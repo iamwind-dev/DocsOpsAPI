@@ -1,0 +1,532 @@
+{
+  "name": "E-Signature - External Provider Integration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/provider-create",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-create",
+      "name": "Webhook - Create Provider Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 200],
+      "webhookId": "e-signature-provider-create"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/signature-requests/{{ $json.body.requestId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-get-request",
+      "name": "HTTP - Get Request Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-request-found",
+      "name": "IF - Request Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/storage/v1/object/public/{{ $json.data.document.storage_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-pdf",
+      "name": "HTTP - Download Document PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chuẩn bị dữ liệu cho external provider\n// Đây là mock - trong production thay bằng API thực của DocuSign/Zoho Sign\n\nconst requestData = $('HTTP - Get Request Details').item.json.data;\nconst signers = requestData.signers.map((s, index) => ({\n  email: s.signer_email,\n  name: s.signer_name || s.signer_email,\n  order: s.order_index || index + 1,\n  signaturePosition: {\n    page: 1,\n    x: 100,\n    y: 700 - (index * 50)\n  }\n}));\n\nreturn {\n  documentTitle: requestData.document.title,\n  documentId: requestData.document.id,\n  requestId: requestData.id,\n  signers: signers,\n  callbackUrl: `${$env.N8N_WEBHOOK_URL}/webhook/e-signature/provider-callback`,\n  expiresAt: requestData.expires_at\n};"
+      },
+      "id": "prepare-provider-data",
+      "name": "Code - Prepare Provider Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1130, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ESIGN_PROVIDER_URL }}/api/envelopes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.ESIGN_PROVIDER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"{{ $json.documentTitle }}\",\n  \"signers\": {{ JSON.stringify($json.signers) }},\n  \"callbackUrl\": \"{{ $json.callbackUrl }}\",\n  \"expiresAt\": \"{{ $json.expiresAt }}\"\n}",
+        "options": {}
+      },
+      "id": "create-provider-envelope",
+      "name": "HTTP - Create Provider Envelope",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1350, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/signature-requests/{{ $('Code - Prepare Provider Data').item.json.requestId }}/provider-info",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"providerEnvelopeId\": \"{{ $json.envelopeId }}\",\n  \"providerSigningUrl\": \"{{ $json.signingUrl }}\",\n  \"providerData\": {{ JSON.stringify($json) }}\n}",
+        "options": {}
+      },
+      "id": "save-provider-info",
+      "name": "HTTP - Save Provider Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, envelopeId: $('HTTP - Create Provider Envelope').item.json.envelopeId, signingUrl: $('HTTP - Create Provider Envelope').item.json.signingUrl }) }}",
+        "options": {}
+      },
+      "id": "respond-success-create",
+      "name": "Respond - Success Create",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1790, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, message: 'Request not found' }) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "respond-error-create",
+      "name": "Respond - Error Create",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/provider-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-callback",
+      "name": "Webhook - Provider Callback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 550],
+      "webhookId": "e-signature-provider-callback"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse callback data từ provider\n// Cấu trúc này tùy thuộc vào provider thực tế\n\nconst callbackData = $input.item.json.body;\n\n// Map status từ provider sang internal status\nconst statusMap = {\n  'completed': 'signed',\n  'declined': 'declined',\n  'expired': 'expired',\n  'voided': 'cancelled'\n};\n\nreturn {\n  providerEnvelopeId: callbackData.envelopeId,\n  providerStatus: callbackData.status,\n  internalStatus: statusMap[callbackData.status] || 'pending',\n  signedDocumentUrl: callbackData.signedDocumentUrl,\n  completedAt: callbackData.completedAt,\n  signerEvents: callbackData.signerEvents || []\n};"
+      },
+      "id": "parse-callback",
+      "name": "Code - Parse Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 550]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.internalStatus }}",
+              "operation": "equals",
+              "value2": "signed"
+            }
+          ]
+        }
+      },
+      "id": "if-completed",
+      "name": "IF - Document Signed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 550]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.signedDocumentUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "download-signed",
+      "name": "HTTP - Download Signed PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 450]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/provider/signed-file",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"providerEnvelopeId\": \"{{ $('Code - Parse Callback').item.json.providerEnvelopeId }}\",\n  \"signedFileUrl\": \"{{ $('Code - Parse Callback').item.json.signedDocumentUrl }}\",\n  \"completedAt\": \"{{ $('Code - Parse Callback').item.json.completedAt }}\"\n}",
+        "options": {}
+      },
+      "id": "upload-signed",
+      "name": "HTTP - Upload Signed to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1130, 450]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"PROVIDER_DOCUMENT_SIGNED\",\n  \"details\": {\n    \"provider_envelope_id\": \"{{ $('Code - Parse Callback').item.json.providerEnvelopeId }}\",\n    \"completed_at\": \"{{ $('Code - Parse Callback').item.json.completedAt }}\",\n    \"signed_document_url\": \"{{ $('Code - Parse Callback').item.json.signedDocumentUrl }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-audit-signed",
+      "name": "HTTP - Log Audit (Signed)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1350, 450]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Callback processed', status: 'signed' }) }}",
+        "options": {}
+      },
+      "id": "respond-callback-signed",
+      "name": "Respond - Callback Signed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1570, 450]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"PROVIDER_STATUS_UPDATE\",\n  \"details\": {\n    \"provider_envelope_id\": \"{{ $('Code - Parse Callback').item.json.providerEnvelopeId }}\",\n    \"status\": \"{{ $('Code - Parse Callback').item.json.internalStatus }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-audit-other",
+      "name": "HTTP - Log Audit (Other Status)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 650]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Callback processed', status: $('Code - Parse Callback').item.json.internalStatus }) }}",
+        "options": {}
+      },
+      "id": "respond-callback-other",
+      "name": "Respond - Callback Other",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1130, 650]
+    }
+  ],
+  "connections": {
+    "Webhook - Create Provider Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Request Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Request Details": {
+      "main": [
+        [
+          {
+            "node": "IF - Request Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Request Found": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Download Document PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Error Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Download Document PDF": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Provider Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Provider Data": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Create Provider Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Create Provider Envelope": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Save Provider Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save Provider Info": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Provider Callback": {
+      "main": [
+        [
+          {
+            "node": "Code - Parse Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Parse Callback": {
+      "main": [
+        [
+          {
+            "node": "IF - Document Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Document Signed": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Download Signed PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP - Log Audit (Other Status)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Download Signed PDF": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Upload Signed to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Upload Signed to Backend": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Audit (Signed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit (Signed)": {
+      "main": [
+        [
+          {
+            "node": "Respond - Callback Signed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit (Other Status)": {
+      "main": [
+        [
+          {
+            "node": "Respond - Callback Other",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "provider"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-05T00:00:00.000Z",
+  "versionId": "1"
+}
