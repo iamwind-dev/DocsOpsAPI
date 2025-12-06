@@ -1,0 +1,290 @@
+{
+  "name": "E-Signature - Daily Reminder Cron",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Cron - Daily 9 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/internal/pending-signers",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "days",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-get-pending",
+      "name": "HTTP - Get Pending Signers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ],
+          "number": [
+            {
+              "value1": "={{ $json.data.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "if-has-pending",
+      "name": "IF - Has Pending Signers",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split-signers",
+      "name": "Split Pending Signers",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.signer_email }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-has-email",
+      "name": "IF - Has Email",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $json.signer_email }}",
+        "subject": "Reminder: Document pending your signature - {{ $json.request.document.title }}",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #F59E0B; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; background: #f9fafb; }\n    .button { display: inline-block; background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 20px; }\n    .warning { background: #FEF3C7; border-left: 4px solid #F59E0B; padding: 12px; margin: 20px 0; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>⏰ Signature Reminder</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hello {{ $json.signer_name || $json.signer_email }},</p>\n      \n      <div class=\"warning\">\n        <strong>Reminder:</strong> You have a document waiting for your signature.\n      </div>\n      \n      <p><strong>Document:</strong> {{ $json.request.document.title }}</p>\n      <p><strong>Requested on:</strong> {{ new Date($json.request.created_at).toLocaleDateString() }}</p>\n      \n      {{ $json.request.expires_at ? '<p><strong>⚠️ Expires:</strong> ' + new Date($json.request.expires_at).toLocaleDateString() + '</p>' : '' }}\n      \n      {{ $json.request.message ? '<p><strong>Message:</strong> ' + $json.request.message + '</p>' : '' }}\n      \n      <p>Please click the button below to review and sign the document:</p>\n      \n      <a href=\"{{ $env.FRONTEND_URL }}/sign?requestId={{ $json.request.id }}&signerId={{ $json.id }}\" class=\"button\">Sign Document Now</a>\n      \n      <p style=\"margin-top: 30px; color: #666;\">If you have already signed this document, please ignore this reminder.</p>\n    </div>\n    <div class=\"footer\">\n      <p>This is an automated reminder from DocsOps E-Signature System</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-reminder",
+      "name": "Send Reminder Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1350, 100],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"SIGNATURE_REMINDER_SENT\",\n  \"documentId\": \"{{ $json.request.document.id }}\",\n  \"details\": {\n    \"signer_email\": \"{{ $json.signer_email }}\",\n    \"request_id\": \"{{ $json.request.id }}\",\n    \"reminder_sent_at\": \"{{ new Date().toISOString() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-audit",
+      "name": "HTTP - Log Audit Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-done",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1790, 100]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-no-pending",
+      "name": "No Pending Signers",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [910, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-skip",
+      "name": "Skip - No Email",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    }
+  ],
+  "connections": {
+    "Cron - Daily 9 AM": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Pending Signers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Pending Signers": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Pending Signers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Pending Signers": {
+      "main": [
+        [
+          {
+            "node": "Split Pending Signers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Pending Signers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Pending Signers": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Email": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip - No Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder Email": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit Event": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "cron"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-05T00:00:00.000Z",
+  "versionId": "1"
+}

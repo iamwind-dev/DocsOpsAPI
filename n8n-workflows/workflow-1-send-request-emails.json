@@ -1,0 +1,284 @@
+{
+  "name": "E-Signature - Send Request Emails",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/send-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Receive Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-send-request"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/signature-requests/{{ $json.body.requestId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-get-request",
+      "name": "HTTP - Get Request Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-request-found",
+      "name": "IF - Request Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data.signers",
+        "options": {}
+      },
+      "id": "split-signers",
+      "name": "Split Signers",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equals",
+              "value2": "pending"
+            }
+          ]
+        }
+      },
+      "id": "if-pending",
+      "name": "IF - Signer Pending",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $json.signer_email }}",
+        "subject": "You have a document to sign: {{ $('HTTP - Get Request Details').item.json.data.document.title }}",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; background: #f9fafb; }\n    .button { display: inline-block; background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 20px; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>Document Signature Request</h1>\n    </div>\n    <div class=\"content\">\n      <p>Hello {{ $json.signer_name || $json.signer_email }},</p>\n      \n      <p>You have been requested to sign the following document:</p>\n      \n      <p><strong>Document:</strong> {{ $('HTTP - Get Request Details').item.json.data.document.title }}</p>\n      \n      {{ $('HTTP - Get Request Details').item.json.data.message ? '<p><strong>Message:</strong> ' + $('HTTP - Get Request Details').item.json.data.message + '</p>' : '' }}\n      \n      {{ $('HTTP - Get Request Details').item.json.data.expires_at ? '<p><strong>Expires:</strong> ' + $('HTTP - Get Request Details').item.json.data.expires_at + '</p>' : '' }}\n      \n      <p>Please click the button below to review and sign the document:</p>\n      \n      <a href=\"{{ $env.FRONTEND_URL }}/sign?requestId={{ $('HTTP - Get Request Details').item.json.data.id }}&signerId={{ $json.id }}\" class=\"button\">Sign Document</a>\n      \n      <p style=\"margin-top: 30px; color: #666;\">If you did not expect this request, please ignore this email or contact the sender.</p>\n    </div>\n    <div class=\"footer\">\n      <p>This is an automated message from DocsOps E-Signature System</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email to Signer",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1350, 100],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/signature-requests/{{ $('Webhook - Receive Request').item.json.body.requestId }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "sent"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-update-status",
+      "name": "HTTP - Update Request Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1570, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Emails sent successfully', requestId: $('Webhook - Receive Request').item.json.body.requestId }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1790, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, message: 'Request not found' }) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond - Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 400]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-skip",
+      "name": "No Operation (Skip)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Receive Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Request Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Request Details": {
+      "main": [
+        [
+          {
+            "node": "IF - Request Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Request Found": {
+      "main": [
+        [
+          {
+            "node": "Split Signers",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Signers": {
+      "main": [
+        [
+          {
+            "node": "IF - Signer Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Signer Pending": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Signer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation (Skip)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Signer": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Update Request Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Update Request Status": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-05T00:00:00.000Z",
+  "versionId": "1"
+}
