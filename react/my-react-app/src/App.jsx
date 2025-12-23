@@ -11,6 +11,7 @@ import Contact from './pages/Contact';
 import Features from './pages/Features';
 import Dashboard from './pages/Dashboard';
 import Documents from './pages/Documents';
+import DocumentsCategory from './pages/DocumentsCategory';
 import ESignature from './pages/ESignature';
 import Audit from './pages/Audit';
 import Storage from './pages/Storage';
@@ -111,6 +112,16 @@ const App = () => {
             <PrivateRoute>
               <DashboardLayout>
                 <Documents />
+              </DashboardLayout>
+            </PrivateRoute>
+          } 
+        />
+        <Route 
+          path="/documents/category/:categoryKey" 
+          element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <DocumentsCategory />
               </DashboardLayout>
             </PrivateRoute>
           } 

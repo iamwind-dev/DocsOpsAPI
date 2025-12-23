@@ -33,7 +33,7 @@ const Register = () => {
 
         try {
             await signUp(email, password, fullName, companyName);
-            navigate('/dashboard');
+            navigate('/settings'); // Redirect đến Settings để cấu hình email phòng ban
         } catch (err) {
             setError(err.message || 'Đăng ký thất bại');
         } finally {

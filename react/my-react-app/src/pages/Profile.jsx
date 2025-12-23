@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
 import '../styles/dashboard.css';
 
 const Profile = () => {
     const { user, userProfile, loadUserProfile: reloadProfile } = useAuth();
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
@@ -352,6 +354,34 @@ const Profile = () => {
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+
+            {/* Department Config Link */}
+            <div className="card" style={{ marginTop: '30px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                        <h3 style={{ marginBottom: '8px', fontSize: '16px' }}>
+                            <i className="fas fa-building" style={{ color: 'var(--accent)', marginRight: '10px' }}></i>
+                            Cấu hình Email Phòng Ban
+                        </h3>
+                        <p style={{ color: 'var(--text-light)', fontSize: '14px', margin: 0 }}>
+                            Quản lý email thông báo cho các phòng ban trong hệ thống
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => navigate('/settings')}
+                        className="btn-sm"
+                        style={{
+                            background: 'var(--accent)',
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        <i className="fas fa-arrow-right" style={{ marginRight: '8px' }}></i>
+                        Quản lý Email Phòng Ban
+                    </button>
                 </div>
             </div>
         </div>

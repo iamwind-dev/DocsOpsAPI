@@ -1,5 +1,7 @@
 /* css/dashboard.css */
 
+@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap');
+
 /* 1. VARIABLES */
 :root {
     --primary: #0f172a;
@@ -740,8 +742,6 @@ tr:hover { background-color: #f8fafc; }
     font-size: 14px;
     pointer-events: none;
 }
-
-@import url('https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&display=swap');
 
 .signature-font-preview {
     font-family: 'Dancing Script', cursive;

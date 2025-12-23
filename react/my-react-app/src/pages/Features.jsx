@@ -35,7 +35,7 @@ const Features = () => {
                             <h2 className="feature-title">Ký duyệt mọi lúc, mọi nơi</h2>
                             <p className="feature-desc">Rút ngắn thời gian phê duyệt từ vài ngày xuống còn vài phút. Hợp pháp và bảo mật.</p>
                             <ul className="feature-list">
-                                <li><i className="fas fa-check-circle"></i> <strong>Quy trình ký tự động:</strong> Thiết lập thứ tự người ký A -> B -> C.</li>
+                                <li><i className="fas fa-check-circle"></i> <strong>Quy trình ký tự động:</strong> Thiết lập thứ tự người ký A → B → C.</li>
                                 <li><i className="fas fa-check-circle"></i> <strong>Nhắc nhở thông minh:</strong> AI tự động gửi email nhắc nếu người ký quên.</li>
                                 <li><i className="fas fa-check-circle"></i> <strong>Chứng thực pháp lý:</strong> Lưu vết thời gian (Timestamp) và địa chỉ IP.</li>
                             </ul>

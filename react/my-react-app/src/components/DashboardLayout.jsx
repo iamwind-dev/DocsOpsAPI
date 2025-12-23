@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
+import { documentAPI } from '../lib/api';
 import '../styles/dashboard.css';
 
 const DashboardLayout = ({ children }) => {
@@ -9,7 +10,13 @@ const DashboardLayout = ({ children }) => {
     const navigate = useNavigate();
     const [showDropdown, setShowDropdown] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [showSearchResults, setShowSearchResults] = useState(false);
+    const [isSearching, setIsSearching] = useState(false);
     const dropdownRef = useRef(null);
+    const searchRef = useRef(null);
+    const searchTimeoutRef = useRef(null);
     
     // Nếu đang loading hoặc chưa có profile, hiển thị loading
     if (loading || !userProfile) {
@@ -46,16 +53,79 @@ const DashboardLayout = ({ children }) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setShowDropdown(false);
             }
+            if (searchRef.current && !searchRef.current.contains(event.target)) {
+                setShowSearchResults(false);
+            }
         };
 
-        if (showDropdown) {
+        if (showDropdown || showSearchResults) {
             document.addEventListener('mousedown', handleClickOutside);
         }
 
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [showDropdown]);
+    }, [showDropdown, showSearchResults]);
+
+    // Search documents với debounce
+    const performSearch = useCallback(async (query) => {
+        if (!query || query.trim().length === 0) {
+            setSearchResults([]);
+            setShowSearchResults(false);
+            return;
+        }
+
+        setIsSearching(true);
+        try {
+            const result = await documentAPI.searchDocuments(query);
+            const documents = result.data?.documents || [];
+            setSearchResults(documents);
+            setShowSearchResults(documents.length > 0);
+        } catch (error) {
+            console.error('Search error:', error);
+            setSearchResults([]);
+            setShowSearchResults(false);
+        } finally {
+            setIsSearching(false);
+        }
+    }, []);
+
+    // Debounce search
+    useEffect(() => {
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
+        if (searchQuery.trim().length > 0) {
+            searchTimeoutRef.current = setTimeout(() => {
+                performSearch(searchQuery);
+            }, 300); // 300ms debounce
+        } else {
+            setSearchResults([]);
+            setShowSearchResults(false);
+        }
+
+        return () => {
+            if (searchTimeoutRef.current) {
+                clearTimeout(searchTimeoutRef.current);
+            }
+        };
+    }, [searchQuery, performSearch]);
+
+    // Handle search input change
+    const handleSearchChange = (e) => {
+        setSearchQuery(e.target.value);
+    };
+
+    // Handle click on search result
+    const handleSearchResultClick = (document) => {
+        if (document.storage_path) {
+            const fileUrl = `https://rtdqjujwbaotbvuioawp.supabase.co/storage/v1/object/public/${document.storage_path}`;
+            window.open(fileUrl, '_blank');
+        }
+        setShowSearchResults(false);
+        setSearchQuery('');
+    };
 
     const handleLogout = async () => {
         try {
@@ -83,9 +153,103 @@ const DashboardLayout = ({ children }) => {
                         >
                             <i className="fas fa-bars"></i>
                         </button>
-                        <div className="search-box">
+                        <div className="search-box" ref={searchRef} style={{ position: 'relative' }}>
                             <i className="fas fa-search" style={{color: '#94a3b8'}}></i>
-                            <input type="text" placeholder="Tìm kiếm tài liệu, hợp đồng..." />
+                            <input 
+                                type="text" 
+                                placeholder="Tìm kiếm tài liệu, hợp đồng..." 
+                                value={searchQuery}
+                                onChange={handleSearchChange}
+                                onFocus={() => {
+                                    if (searchResults.length > 0) {
+                                        setShowSearchResults(true);
+                                    }
+                                }}
+                            />
+                            {isSearching && (
+                                <i className="fas fa-spinner fa-spin" style={{
+                                    position: 'absolute',
+                                    right: '12px',
+                                    color: '#94a3b8',
+                                    fontSize: '14px'
+                                }}></i>
+                            )}
+                            {showSearchResults && searchResults.length > 0 && (
+                                <div style={{
+                                    position: 'absolute',
+                                    top: '100%',
+                                    left: 0,
+                                    right: 0,
+                                    marginTop: '8px',
+                                    backgroundColor: 'white',
+                                    borderRadius: '8px',
+                                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                                    border: '1px solid #e2e8f0',
+                                    maxHeight: '400px',
+                                    overflowY: 'auto',
+                                    zIndex: 1000,
+                                }}>
+                                    {searchResults.map((doc) => (
+                                        <div
+                                            key={doc.id}
+                                            onClick={() => handleSearchResultClick(doc)}
+                                            style={{
+                                                padding: '12px 16px',
+                                                cursor: 'pointer',
+                                                borderBottom: '1px solid #f1f5f9',
+                                                transition: 'background 0.2s',
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.backgroundColor = '#f8fafc';
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.backgroundColor = 'white';
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '12px',
+                                            }}>
+                                                <i className="fas fa-file" style={{
+                                                    color: '#3b82f6',
+                                                    fontSize: '18px',
+                                                    flexShrink: 0,
+                                                }}></i>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{
+                                                        fontWeight: 500,
+                                                        fontSize: '14px',
+                                                        color: '#1e293b',
+                                                        marginBottom: '4px',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap',
+                                                    }}>
+                                                        {doc.title || 'Không có tiêu đề'}
+                                                    </div>
+                                                    {doc.description && (
+                                                        <div style={{
+                                                            fontSize: '12px',
+                                                            color: '#64748b',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            whiteSpace: 'nowrap',
+                                                        }}>
+                                                            {doc.description}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <i className="fas fa-external-link-alt" style={{
+                                                    color: '#94a3b8',
+                                                    fontSize: '12px',
+                                                    flexShrink: 0,
+                                                }}></i>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="user-menu">
