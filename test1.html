@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>n8n Multi-File Uploader Tool</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px; background-color: #f4f4f9; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #333; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; color: white; transition: 0.2s; }
+        .btn-primary { background-color: #007bff; }
+        .btn-primary:hover { background-color: #0056b3; }
+        .btn-warning { background-color: #ff9800; }
+        .btn-warning:hover { background-color: #e68900; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        th, td { border: 1px solid #eee; padding: 10px; text-align: left; }
+        th { background-color: #f8f9fa; }
+        .status-pending { color: #999; }
+        .status-uploading { color: #007bff; font-weight: bold; }
+        .status-success { color: #28a745; font-weight: bold; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        #log { margin-top: 20px; background: #222; color: #0f0; padding: 10px; font-family: monospace; height: 150px; overflow-y: scroll; border-radius: 4px; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>🚀 Công cụ Test Upload Nhiều File</h2>
+    
+    <div class="form-group">
+        <label>1. Webhook URL (n8n):</label>
+        <input type="text" id="webhookUrl" placeholder="Dán link Webhook vào đây (VD: https://n8n.docops.me/webhook/...)" value="http://n8n.docsops.me/webhook-test/upload-files">
+        <small style="color: #666;">Lưu ý: Nếu dùng localhost, hãy đảm bảo n8n đang mở.</small>
+    </div>
+
+    <div class="form-group">
+        <label>2. Owner ID (Giả lập User):</label>
+        <input type="text" id="ownerId" value="ca272d5d-4e6f-4d82-8383-26581be88221">
+    </div>
+
+    <div class="form-group">
+        <label>3. Chọn File (Cho phép chọn nhiều):</label>
+        <input type="file" id="fileInput" multiple>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-primary" onclick="uploadParallel()">⚡ Gửi ồ ạt (Song song)</button>
+        <button class="btn-warning" onclick="uploadQueue()">🐢 Gửi lần lượt (Queue)</button>
+    </div>
+
+    <table id="fileTable">
+        <thead>
+            <tr>
+                <th>Tên File</th>
+                <th>Kích thước</th>
+                <th>Trạng thái</th>
+            </tr>
+        </thead>
+        <tbody>
+            </tbody>
+    </table>
+
+    <div id="log">Logs sẽ hiện ở đây...</div>
+</div>
+
+<script>
+    const logDiv = document.getElementById('log');
+    
+    function log(msg) {
+        logDiv.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    function getFiles() {
+        return Array.from(document.getElementById('fileInput').files);
+    }
+
+    function renderTable(files) {
+        const tbody = document.querySelector('#fileTable tbody');
+        tbody.innerHTML = '';
+        files.forEach((file, index) => {
+            const row = `<tr>
+                <td>${file.name}</td>
+                <td>${(file.size / 1024).toFixed(2)} KB</td>
+                <td id="status-${index}" class="status-pending">Chờ gửi...</td>
+            </tr>`;
+            tbody.innerHTML += row;
+        });
+    }
+
+    async function uploadSingleFile(file, index, url, ownerId) {
+        const statusCell = document.getElementById(`status-${index}`);
+        const startTime = Date.now();
+        
+        // Log khi bắt đầu gửi
+        log(`[File ${index + 1}] Bắt đầu gửi: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`);
+        statusCell.textContent = "Đang gửi...";
+        statusCell.className = "status-uploading";
+
+        const formData = new FormData();
+        // Key này ('data') phải khớp với cài đặt trong node Webhook n8n
+        formData.append('data', file); 
+        formData.append('owner_id', ownerId);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+
+            const endTime = Date.now();
+            const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+            if (response.ok) {
+                statusCell.textContent = "✅ Đã gửi xong";
+                statusCell.className = "status-success";
+                log(`[File ${index + 1}] ✅ Thành công: ${file.name} (${duration}s)`);
+            } else {
+                throw new Error(response.statusText);
+            }
+        } catch (error) {
+            const endTime = Date.now();
+            const duration = ((endTime - startTime) / 1000).toFixed(2);
+            statusCell.textContent = "❌ Lỗi: " + error.message;
+            statusCell.className = "status-error";
+            log(`[File ${index + 1}] ❌ Lỗi: ${file.name} - ${error.message} (${duration}s)`);
+        }
+    }
+
+    // Cách 1: Gửi ồ ạt cùng lúc (Test chịu tải)
+    async function uploadParallel() {
+        const files = getFiles();
+        const url = document.getElementById('webhookUrl').value;
+        const ownerId = document.getElementById('ownerId').value;
+
+        if (files.length === 0 || !url) { alert("Vui lòng chọn file và điền URL!"); return; }
+        renderTable(files);
+        log(`Bắt đầu gửi song song ${files.length} file...`);
+
+        // Chạy tất cả promise cùng lúc
+        const promises = files.map((file, index) => uploadSingleFile(file, index, url, ownerId));
+        await Promise.all(promises);
+        log("Đã hoàn tất toàn bộ quy trình.");
+    }
+
+    // Cách 2: Gửi lần lượt (An toàn)
+    async function uploadQueue() {
+        const files = getFiles();
+        const url = document.getElementById('webhookUrl').value;
+        const ownerId = document.getElementById('ownerId').value;
+
+        if (files.length === 0 || !url) { alert("Vui lòng chọn file và điền URL!"); return; }
+        renderTable(files);
+        log(`Bắt đầu gửi lần lượt ${files.length} file...`);
+
+        // Dùng vòng lặp for...of để đợi (await) từng cái
+        for (let i = 0; i < files.length; i++) {
+            await uploadSingleFile(files[i], i, url, ownerId);
+            log(`Đang chờ 1 chút trước khi gửi file tiếp theo...`);
+            await new Promise(r => setTimeout(r, 1000)); // Nghỉ 1 giây giữa các lần gửi
+        }
+        log("Đã hoàn tất toàn bộ quy trình.");
+    }
+</script>
+
+</body>
+</html>

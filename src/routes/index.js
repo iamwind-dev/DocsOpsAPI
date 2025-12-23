@@ -8,6 +8,7 @@ const {
   auditRoutes,
   archiveRoutes,
   authRoutes,
+  departmentRoutes,
 } = require('../flows');
 
 // Health check
@@ -26,5 +27,6 @@ router.use('/classification', classificationRoutes);
 router.use('/e-signature', eSignatureRoutes);
 router.use('/audit', auditRoutes);
 router.use('/archives', archiveRoutes);
+router.use('/department-configs', departmentRoutes);
 
 module.exports = router;

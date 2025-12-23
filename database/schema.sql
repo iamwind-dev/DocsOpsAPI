@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS documents (
   sensitivity_level TEXT DEFAULT 'unknown',
   gdpr_flags JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
+  update_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Index cho documents
@@ -186,7 +186,7 @@ CREATE POLICY "Users can view their audit events" ON audit_events
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.updated_at = now();
+  NEW.update_at = now();
   RETURN NEW;
 END;
 $$ language 'plpgsql';

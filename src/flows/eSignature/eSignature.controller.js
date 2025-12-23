@@ -604,7 +604,7 @@ const signDocument = catchAsync(async (req, res) => {
         // Update document status to 'signed'
         await supabaseAdmin
           .from('documents')
-          .update({ status: 'signed', updated_at: new Date().toISOString() })
+          .update({ status: 'signed', update_at: new Date().toISOString() })
           .eq('id', documentId);
       }
     }
@@ -839,7 +839,7 @@ const receiveSignedFile = catchAsync(async (req, res) => {
     .from('documents')
     .update({ 
       status: 'signed',
-      updated_at: new Date().toISOString(),
+      update_at: new Date().toISOString(),
       // Có thể lưu signed file URL vào storage_path hoặc field riêng
     })
     .eq('id', documentId);
