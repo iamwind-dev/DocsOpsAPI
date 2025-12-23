@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<body>
+  <h2>Upload File to n8n</h2>
+
+  <input type="text" id="idInput" placeholder="Nhập ID" style="margin-bottom: 10px; padding: 8px; width: 200px; display: block;" />
+  <input type="file" id="fileInput" style="margin-bottom: 10px;" />
+  <button onclick="upload()">Upload</button>
+
+  <script>
+    async function upload() {
+      const fileInput = document.getElementById("fileInput");
+      const file = fileInput.files[0];
+      
+      if (!file) {
+        alert("Vui lòng chọn file trước!");
+        return;
+      }
+
+      const idInput = document.getElementById("idInput");
+      const id = idInput.value.trim();
+      
+      if (!id) {
+        alert("Vui lòng nhập ID trước!");
+        return;
+      }
+
+      const form = new FormData();
+      // QUAN TRỌNG: Đổi tên key từ "file" thành "data" để khớp với n8n
+      form.append("data", file);
+      form.append("id", id); 
+
+      try {
+        // Lưu ý: Đảm bảo n8n đang chạy (Execute Workflow) trước khi bấm Upload
+        const res = await fetch("http://n8n.docsops.me/webhook/upload-file", {
+          method: "POST",
+          body: form
+        });
+
+        if (res.ok) {
+          alert("Gửi file thành công! Kiểm tra n8n ngay.");
+        } else {
+          alert("Lỗi khi gửi: " + res.statusText);
+        }
+      } catch (error) {
+        alert("Không kết nối được tới n8n. Hãy kiểm tra URL hoặc CORS.");
+        console.error(error);
+      }
+    }
+  </script>
+
+</body>
+</html>

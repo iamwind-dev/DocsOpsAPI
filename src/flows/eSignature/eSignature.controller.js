@@ -839,7 +839,9 @@ const receiveSignedFile = catchAsync(async (req, res) => {
     .from('documents')
     .update({ 
       status: 'signed',
-      updated_at: new Date().toISOString(),
+
+      update_at: new Date().toISOString(),
+
       // Có thể lưu signed file URL vào storage_path hoặc field riêng
     })
     .eq('id', documentId);
