@@ -5,6 +5,7 @@ const {
   documentRoutes,
   classificationRoutes,
   eSignatureRoutes,
+  eSignatureExtensionRoutes,
   auditRoutes,
   archiveRoutes,
 } = require('../flows');
@@ -22,6 +23,7 @@ router.get('/health', (req, res) => {
 router.use('/documents', documentRoutes);
 router.use('/classification', classificationRoutes);
 router.use('/e-signature', eSignatureRoutes);
+router.use('/e-signature-ext', eSignatureExtensionRoutes);
 router.use('/audit', auditRoutes);
 router.use('/archives', archiveRoutes);
 

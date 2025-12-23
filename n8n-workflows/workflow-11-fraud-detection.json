@@ -1,0 +1,298 @@
+{
+  "name": "E-Signature - Fraud Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/signing-started",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Signing Started",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-signing-started"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/log-session",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"signerId\": \"{{ $json.body.signerId }}\",\n  \"ipAddress\": \"{{ $json.body.ipAddress }}\",\n  \"userAgent\": \"{{ $json.body.userAgent }}\",\n  \"deviceFingerprint\": \"{{ $json.body.deviceFingerprint }}\"\n}",
+        "options": {}
+      },
+      "id": "http-log-session",
+      "name": "HTTP - Log Session",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, sessionId: $json.data.id }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Session Logged",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/signing-completed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-completed",
+      "name": "Webhook - Signing Completed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 550],
+      "webhookId": "e-signature-signing-completed"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/check-fraud",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sessionId\": \"{{ $json.body.sessionId }}\",\n  \"signerId\": \"{{ $json.body.signerId }}\",\n  \"signedAt\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "http-check-fraud",
+      "name": "HTTP - Check Fraud",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 550]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.data.isSuspicious }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-suspicious",
+      "name": "IF - Is Suspicious",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 550]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "🚨 Suspicious Signing Activity Detected",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: #DC2626; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; background: #f9fafb; }\n    .alert { background: #FEE2E2; border-left: 4px solid #DC2626; padding: 12px; margin: 20px 0; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🚨 Security Alert</h1>\n    </div>\n    <div class=\"content\">\n      <div class=\"alert\">\n        <strong>Suspicious signing activity has been detected!</strong>\n      </div>\n      <p><strong>Session ID:</strong> {{ $('Webhook - Signing Completed').item.json.body.sessionId }}</p>\n      <p><strong>Signer ID:</strong> {{ $('Webhook - Signing Completed').item.json.body.signerId }}</p>\n      <p><strong>Duration:</strong> {{ $json.data.durationSeconds }} seconds</p>\n      <p><strong>Reasons:</strong></p>\n      <ul>\n        {{ $json.data.suspicionReasons.map(r => '<li>' + r + '</li>').join('') }}\n      </ul>\n      <p>Please review this activity in the admin dashboard.</p>\n    </div>\n    <div class=\"footer\">\n      <p>DocsOps E-Signature Security System</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-alert",
+      "name": "Send Alert to Admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [910, 450],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/broadcast-event",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"FRAUD_DETECTED\",\n  \"data\": {\n    \"sessionId\": \"{{ $('Webhook - Signing Completed').item.json.body.sessionId }}\",\n    \"signerId\": \"{{ $('Webhook - Signing Completed').item.json.body.signerId }}\",\n    \"reasons\": {{ JSON.stringify($('HTTP - Check Fraud').item.json.data.suspicionReasons) }}\n  }\n}",
+        "options": {}
+      },
+      "id": "broadcast-fraud",
+      "name": "HTTP - Broadcast Fraud Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1130, 450]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, isSuspicious: $('HTTP - Check Fraud').item.json.data.isSuspicious, reasons: $('HTTP - Check Fraud').item.json.data.suspicionReasons }) }}",
+        "options": {}
+      },
+      "id": "respond-fraud",
+      "name": "Respond - Fraud Check Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1350, 450]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, isSuspicious: false }) }}",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond - OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 650]
+    }
+  ],
+  "connections": {
+    "Webhook - Signing Started": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Session": {
+      "main": [
+        [
+          {
+            "node": "Respond - Session Logged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - Signing Completed": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Check Fraud",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Check Fraud": {
+      "main": [
+        [
+          {
+            "node": "IF - Is Suspicious",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Is Suspicious": {
+      "main": [
+        [
+          {
+            "node": "Send Alert to Admin",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert to Admin": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Broadcast Fraud Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Broadcast Fraud Event": {
+      "main": [
+        [
+          {
+            "node": "Respond - Fraud Check Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "security"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-07T00:00:00.000Z",
+  "versionId": "1"
+}

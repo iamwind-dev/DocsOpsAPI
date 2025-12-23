@@ -1,0 +1,242 @@
+{
+  "name": "E-Signature - Multi-Step Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/approval-action",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Approval Action",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-approval-action"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process approval action\nconst body = $input.item.json.body;\nconst { stepId, action, comments } = body;\n\nreturn {\n  stepId,\n  action, // 'approved' or 'rejected'\n  comments,\n  processedAt: new Date().toISOString()\n};"
+      },
+      "id": "code-process",
+      "name": "Code - Process Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "operation": "equals",
+              "value2": "approved"
+            }
+          ]
+        }
+      },
+      "id": "if-approved",
+      "name": "IF - Approved",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"APPROVAL_STEP_{{ $('Code - Process Action').item.json.action.toUpperCase() }}\",\n  \"details\": {\n    \"stepId\": \"{{ $('Code - Process Action').item.json.stepId }}\",\n    \"action\": \"{{ $('Code - Process Action').item.json.action }}\",\n    \"comments\": \"{{ $('Code - Process Action').item.json.comments }}\",\n    \"processedAt\": \"{{ $('Code - Process Action').item.json.processedAt }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-audit",
+      "name": "HTTP - Log Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/broadcast-event",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"APPROVAL_UPDATED\",\n  \"data\": {\n    \"stepId\": \"{{ $('Code - Process Action').item.json.stepId }}\",\n    \"action\": \"{{ $('Code - Process Action').item.json.action }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "broadcast",
+      "name": "HTTP - Broadcast Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Approval step processed', action: $('Code - Process Action').item.json.action }) }}",
+        "options": {}
+      },
+      "id": "respond-approved",
+      "name": "Respond - Approved",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1350, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "❌ Approval Rejected",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<body>\n  <h2>Approval Step Rejected</h2>\n  <p><strong>Step ID:</strong> {{ $('Code - Process Action').item.json.stepId }}</p>\n  <p><strong>Comments:</strong> {{ $('Code - Process Action').item.json.comments || 'No comments' }}</p>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-rejection",
+      "name": "Send Rejection Notice",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [910, 400],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Rejection processed', action: 'rejected' }) }}",
+        "options": {}
+      },
+      "id": "respond-rejected",
+      "name": "Respond - Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1130, 400]
+    }
+  ],
+  "connections": {
+    "Webhook - Approval Action": {
+      "main": [
+        [
+          {
+            "node": "Code - Process Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Process Action": {
+      "main": [
+        [
+          {
+            "node": "IF - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Approved": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Audit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Rejection Notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Broadcast Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Broadcast Event": {
+      "main": [
+        [
+          {
+            "node": "Respond - Approved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Rejection Notice": {
+      "main": [
+        [
+          {
+            "node": "Respond - Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "approval"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-07T00:00:00.000Z",
+  "versionId": "1"
+}

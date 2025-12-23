@@ -1,0 +1,297 @@
+{
+  "name": "E-Signature - User Signature Creation & Management",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/create-user-signature",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Create User Signature",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-create-user-signature"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate and process input data\nconst body = $input.item.json.body;\n\n// Validate required fields\nif (!body.userId) {\n  throw new Error('userId is required');\n}\nif (!body.signatureImage) {\n  throw new Error('signatureImage is required');\n}\nif (!body.pin) {\n  throw new Error('pin is required');\n}\nif (body.pin.length < 4) {\n  throw new Error('PIN must be at least 4 characters');\n}\n\n// Validate base64 image\nconst base64Regex = /^(data:image\\/[a-zA-Z]+;base64,)?[A-Za-z0-9+/=]+$/;\nconst imageData = body.signatureImage.replace(/^data:image\\/\\w+;base64,/, '');\nif (!base64Regex.test(imageData)) {\n  throw new Error('Invalid signature image format');\n}\n\n// Hash PIN using SHA-256\nconst crypto = require('crypto');\nconst pinHash = crypto.createHash('sha256').update(body.pin).digest('hex');\n\nreturn {\n  userId: body.userId,\n  userEmail: body.userEmail || '',\n  signatureImage: body.signatureImage,\n  pinHash: pinHash,\n  signatureType: body.signatureType || 'drawn',\n  processedAt: new Date().toISOString()\n};"
+      },
+      "id": "code-process",
+      "name": "Code - Hash PIN & Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error === undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-valid",
+      "name": "IF - Validation Passed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/user-signature/internal/create",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"userId\": \"{{ $('Code - Hash PIN & Validate').item.json.userId }}\",\n  \"signatureImage\": \"{{ $('Code - Hash PIN & Validate').item.json.signatureImage }}\",\n  \"pinHash\": \"{{ $('Code - Hash PIN & Validate').item.json.pinHash }}\",\n  \"signatureType\": \"{{ $('Code - Hash PIN & Validate').item.json.signatureType }}\"\n}",
+        "options": {}
+      },
+      "id": "http-save",
+      "name": "HTTP - Save to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-saved",
+      "name": "IF - Save Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"USER_SIGNATURE_CREATED\",\n  \"actorId\": \"{{ $('Code - Hash PIN & Validate').item.json.userId }}\",\n  \"details\": {\n    \"signature_type\": \"{{ $('Code - Hash PIN & Validate').item.json.signatureType }}\",\n    \"signature_image_id\": \"{{ $('HTTP - Save to Backend').item.json.data.signatureImageId }}\",\n    \"created_at\": \"{{ new Date().toISOString() }}\",\n    \"source\": \"n8n_workflow17\"\n  }\n}",
+        "options": {}
+      },
+      "id": "http-audit",
+      "name": "HTTP - Log Audit Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1350, 100]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $('Code - Hash PIN & Validate').item.json.userEmail }}",
+        "subject": "✅ Chữ ký điện tử của bạn đã được tạo thành công",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }\n    .content { padding: 30px; background: #f9fafb; border-radius: 0 0 8px 8px; }\n    .success-icon { font-size: 48px; margin-bottom: 10px; }\n    .info-box { background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10B981; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }\n    .button { display: inline-block; background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 20px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <div class=\"success-icon\">✍️</div>\n      <h1>Chữ ký đã được tạo!</h1>\n    </div>\n    <div class=\"content\">\n      <p>Xin chào,</p>\n      <p>Chữ ký điện tử của bạn đã được tạo thành công và sẵn sàng sử dụng.</p>\n      \n      <div class=\"info-box\">\n        <p><strong>📝 Loại chữ ký:</strong> {{ $('Code - Hash PIN & Validate').item.json.signatureType === 'drawn' ? 'Vẽ tay' : ($('Code - Hash PIN & Validate').item.json.signatureType === 'uploaded' ? 'Upload' : 'Văn bản') }}</p>\n        <p><strong>🕐 Thời gian tạo:</strong> {{ new Date().toLocaleString('vi-VN') }}</p>\n      </div>\n      \n      <p>Bây giờ bạn có thể sử dụng chữ ký này để ký các tài liệu điện tử.</p>\n      \n      <p><strong>⚠️ Lưu ý bảo mật:</strong></p>\n      <ul>\n        <li>Không chia sẻ PIN của bạn với bất kỳ ai</li>\n        <li>Chữ ký của bạn có giá trị pháp lý như chữ ký tay</li>\n      </ul>\n      \n      <a href=\"{{ $env.FRONTEND_URL }}/signature\" class=\"button\">Quản lý chữ ký</a>\n    </div>\n    <div class=\"footer\">\n      <p>Đây là email tự động từ DocsOps E-Signature System</p>\n      <p>© {{ new Date().getFullYear() }} DocsOps. All rights reserved.</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1570, 100],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'User signature created successfully', data: { signatureImageId: $('HTTP - Save to Backend').item.json.data.signatureImageId, imageUrl: $('HTTP - Save to Backend').item.json.data.imageUrl, signatureType: $('HTTP - Save to Backend').item.json.data.signatureType } }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1790, 100]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, message: 'Failed to save signature', error: $json.message || 'Unknown error' }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-save-error",
+      "name": "Respond - Save Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1350, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, message: 'Validation failed', error: $json.error?.message || 'Invalid input data' }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond-validation-error",
+      "name": "Respond - Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 400]
+    }
+  ],
+  "connections": {
+    "Webhook - Create User Signature": {
+      "main": [
+        [
+          {
+            "node": "Code - Hash PIN & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Hash PIN & Validate": {
+      "main": [
+        [
+          {
+            "node": "IF - Validation Passed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Validation Passed": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Save to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Save to Backend": {
+      "main": [
+        [
+          {
+            "node": "IF - Save Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Save Success": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Audit Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Save Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit Event": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmation Email": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "user-signature"
+    },
+    {
+      "name": "workflow17"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-08T00:00:00.000Z",
+  "versionId": "1"
+}
