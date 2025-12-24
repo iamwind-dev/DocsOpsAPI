@@ -546,7 +546,62 @@ const insertSignatureToPdf = catchAsync(async (req, res) => {
 
     console.log('PDF processed successfully, size:', pdfBytes.length);
 
-    // Return PDF as base64
+    // Lưu PDF đã ký vào Supabase Storage
+    const timestamp = Date.now();
+    const signedFileName = `signed_${timestamp}_${req.file.originalname || 'document.pdf'}`;
+    const storagePath = `documents/${userId}/${signedFileName}`;
+    
+    const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+      .from('documents')
+      .upload(storagePath, Buffer.from(pdfBytes), {
+        contentType: 'application/pdf',
+        upsert: false
+      });
+    
+    if (uploadError) {
+      console.error('Upload signed PDF error:', uploadError);
+      throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to save signed PDF');
+    }
+    
+    // Lấy public URL của file đã ký
+    const { data: urlData } = supabaseAdmin.storage
+      .from('documents')
+      .getPublicUrl(storagePath);
+    
+    const signedPdfUrl = urlData?.publicUrl;
+    console.log('Signed PDF uploaded:', signedPdfUrl);
+    
+    // Tạo document record mới cho file đã ký
+    const { data: newDocument, error: docError } = await supabaseAdmin
+      .from('documents')
+      .insert({
+        title: `[Signed] ${req.file.originalname || 'Document'}`,
+        description: `Signed by user at ${new Date().toISOString()}`,
+        owner_id: userId,
+        storage_path: storagePath,
+        // file_type: 'application/pdf', // Column not found
+        // file_size: pdfBytes.length, // Column not found
+        // status: 'active', // Check constraint violation
+        // metadata: { ... } // Column not found
+        // metadata: {
+        //   original_file: req.file.originalname,
+        //   signed_at: new Date().toISOString(),
+        //   signature_id: signature.id,
+        //   page_signed: pageNumber,
+        //   signature_position: { x: sigX, y: sigY, width: sigWidth, height: sigHeight }
+        // }
+      })
+      .select()
+      .single();
+    
+    if (docError) {
+      console.error('Create document record error:', docError);
+      throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to save signed document record: ' + docError.message);
+    }
+    
+    console.log('Document record created:', newDocument?.id);
+
+    // Return PDF as base64 cùng với document info
     const pdfBase64 = Buffer.from(pdfBytes).toString('base64');
 
     return response.success(res, {
@@ -554,9 +609,17 @@ const insertSignatureToPdf = catchAsync(async (req, res) => {
       pdfSize: pdfBytes.length,
       signatureId: signature.id,
       page: pageNumber,
-      position: { x: Math.round(sigX), y: Math.round(pageHeight - sigY - sigHeight) }, // Return in canvas coords
-      size: { width: sigWidth, height: sigHeight }
-    }, 'Signature inserted successfully');
+      position: { x: Math.round(sigX), y: Math.round(pageHeight - sigY - sigHeight) },
+      size: { width: sigWidth, height: sigHeight },
+      // Thông tin document đã ký (quan trọng để gửi signature request)
+      document: newDocument ? {
+        id: newDocument.id,
+        title: newDocument.title,
+        storage_path: newDocument.storage_path,
+        url: signedPdfUrl
+      } : null,
+      signedPdfUrl: signedPdfUrl
+    }, 'Signature inserted and document saved successfully');
 
   } catch (error) {
     console.error('PDF processing error:', error);

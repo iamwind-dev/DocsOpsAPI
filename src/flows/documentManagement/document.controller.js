@@ -18,7 +18,7 @@ const getUserDocuments = catchAsync(async (req, res) => {
     .select('*')
     .eq('owner_id', ownerId)
     .neq('status', 'deleted')
-    .order('updated_at', { ascending: false })
+    .order('update_at', { ascending: false })
     .limit(5);
 
   if (error) {
@@ -59,7 +59,7 @@ const searchDocuments = catchAsync(async (req, res) => {
     .select('*')
     .eq('owner_id', ownerId)
     .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`)
-    .order('updated_at', { ascending: false })
+    .order('update_at', { ascending: false })
     .limit(20);
 
   if (error) {
@@ -120,7 +120,7 @@ const getDocumentsByCategory = catchAsync(async (req, res) => {
     query = query.ilike('storage_path', `${escapedPrefix}/%`);
   }
 
-  const { data, error } = await query.order('updated_at', { ascending: false });
+  const { data, error } = await query.order('update_at', { ascending: false });
 
   if (error) {
     console.error('Error fetching documents by category:', error);
@@ -336,7 +336,7 @@ const deleteDocument = catchAsync(async (req, res) => {
   // Update status to deleted (soft delete)
   const { data: updated, error: updateError } = await supabaseAdmin
     .from('documents')
-    .update({ status: 'deleted', updated_at: new Date().toISOString() })
+    .update({ status: 'deleted', update_at: new Date().toISOString() })
     .eq('id', id)
     .select()
     .single();
@@ -380,6 +380,34 @@ const uploadDocumentsToQueue = catchAsync(async (req, res) => {
   const ownerId = req.user.id;
   const uploadedFiles = [];
   const errors = [];
+
+  // Ensure user profile exists (required for foreign key constraint)
+  try {
+    const { data: existingProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id')
+      .eq('user_id', ownerId)
+      .single();
+
+    if (!existingProfile) {
+      console.log('Creating user profile for:', ownerId);
+      const { error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .insert({
+          user_id: ownerId,
+          email: req.user.email,
+          role: 'user'
+        });
+
+      if (profileError) {
+        console.error('Failed to create user profile:', profileError);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to create user profile');
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    console.error('Error checking user profile:', error);
+  }
 
   // Bucket name - đã có sẵn
   const bucketName = 'polling_queue';

@@ -158,6 +158,45 @@ router.put('/internal/notifications/:id/status', apiKeyAuth, extController.updat
 router.get('/internal/failed-notifications', apiKeyAuth, extController.getFailedNotifications);
 
 // ============================================
+// E. AI SIGNATURE DETECTION (Workflow 18)
+// ============================================
+
+/**
+ * POST /internal/get-document-data
+ * Get document data for AI processing
+ * Body: { documentId }
+ */
+router.post('/internal/get-document-data', apiKeyAuth, extController.getDocumentData);
+
+/**
+ * POST /internal/convert-to-images
+ * Convert PDF to images for AI analysis
+ * Body: { documentPath }
+ */
+router.post('/internal/convert-to-images', apiKeyAuth, extController.convertPdfToImages);
+
+/**
+ * POST /internal/extract-text
+ * Extract text from PDF for AI text analysis
+ * Body: { documentPath }
+ */
+router.post('/internal/extract-text', apiKeyAuth, extController.extractPdfText);
+
+/**
+ * POST /internal/create-test-request
+ * Create test signature request for AI workflow (bypass RLS)
+ * Body: { fileName, fileType, fileSize, userId, title }
+ */
+router.post('/internal/create-test-request', apiKeyAuth, extController.createTestRequest);
+
+/**
+ * POST /internal/apply-default-signatures
+ * Apply default signatures at detected positions
+ * Body: { documentId, signaturePositions: [{ page, x, y, width, height, type, signer, reason }], useDefaultSignature }
+ */
+router.post('/internal/apply-default-signatures', apiKeyAuth, extController.applyDefaultSignatures);
+
+// ============================================
 // D. USER SIGNATURE MANAGEMENT (Workflow 17)
 // ============================================
 

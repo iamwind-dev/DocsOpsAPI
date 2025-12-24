@@ -1,0 +1,254 @@
+{
+  "name": "E-Signature - AI Signature Position Detection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/ai-detect-positions",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-ai-detect-positions"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/get-document-data",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"documentId\": \"{{ $json.body.documentId }}\"\n}",
+        "options": {}
+      },
+      "id": "http-get-document",
+      "name": "Get Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-document-exists",
+      "name": "IF Document Exists",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/extract-text",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"documentPath\": \"{{ $json.data.documentPath }}\"\n}",
+        "options": {}
+      },
+      "id": "http-extract-text",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Store documentId and documentPath for later use\nconst prevData = $input.item.json;\nreturn {\n  json: {\n    ...prevData,\n    _documentId: prevData.data?.documentId || '',\n    _documentPath: prevData.data?.documentPath || '',\n    _textByPage: prevData.data?.textByPage || ''\n  }\n};"
+      },
+      "id": "set-context",
+      "name": "Set Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "text",
+        "operation": "complete",
+        "modelId": "gpt-3.5-turbo",
+        "prompt": "=Phân tích nội dung tài liệu sau và xác định các trang cần chữ ký.\n\nTìm các từ khóa như:\n- \"Ký tên:\", \"Chữ ký:\", \"Signature:\", \"Sign here\"\n- Dấu gạch chân dài (________)\n- \"Người ký\", \"Signer\", \"Signed by\"\n- \"Ngày tháng năm\", \"Date:\"\n- \"Xác nhận\", \"Confirm\", \"Approve\"\n\nNội dung tài liệu:\n{{ $json._textByPage }}\n\nTrả về JSON format:\n{\n  \"signatures\": [\n    {\n      \"page\": 1,\n      \"type\": \"signature\",\n      \"signer\": \"tên người ký\",\n      \"reason\": \"lý do cần ký\",\n      \"keywords\": [\"từ khóa tìm thấy\"]\n    }\n  ]\n}\n\nCHỈ trả về JSON, không có text khác.",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.2
+        }
+      },
+      "id": "openai-detect",
+      "name": "OpenAI Detect",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1.3,
+      "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get context from Set Context node\nconst contextData = $('Set Context').item.json;\nconst documentId = contextData._documentId || contextData.data?.documentId || '';\nconst documentPath = contextData._documentPath || contextData.data?.documentPath || '';\n\n// Handle n8n OpenAI response format\nlet aiResponse = '';\n\ntry {\n  const inputJson = $input.item.json;\n  \n  if (Array.isArray(inputJson) && inputJson[0] && inputJson[0].output) {\n    aiResponse = inputJson[0].output;\n  } else if (inputJson.output) {\n    aiResponse = inputJson.output;\n  } else if (inputJson.choices && inputJson.choices[0]) {\n    aiResponse = inputJson.choices[0].text || inputJson.choices[0].message?.content || '';\n  } else if (inputJson.content) {\n    aiResponse = inputJson.content;\n  } else if (inputJson.text) {\n    aiResponse = inputJson.text;\n  } else if (typeof inputJson === 'string') {\n    aiResponse = inputJson;\n  }\n} catch (e) {\n  console.log('Error extracting AI response:', e.message);\n}\n\nlet detectedPositions;\n\ntry {\n  if (aiResponse && aiResponse.trim()) {\n    let cleanJson = aiResponse;\n    cleanJson = cleanJson.replace(/```json\\n?/gi, '').replace(/```\\n?/gi, '').trim();\n    const jsonMatch = cleanJson.match(/\\{[\\s\\S]*\\}/);\n    if (jsonMatch) {\n      detectedPositions = JSON.parse(jsonMatch[0]);\n    } else {\n      detectedPositions = JSON.parse(cleanJson);\n    }\n  } else {\n    throw new Error('Empty AI response');\n  }\n} catch (error) {\n  console.log('Parse error:', error.message);\n  detectedPositions = {\n    signatures: [{ page: 1, type: 'signature', signer: 'default', reason: 'Vị trí mặc định' }]\n  };\n}\n\nconst signatures = detectedPositions.signatures || [{ page: 1, type: 'signature', signer: 'default', reason: 'Mặc định' }];\n\nconst positionsWithCoordinates = signatures.map(sig => ({\n  page: sig.page || 1,\n  x: 350,\n  y: 700,\n  width: 200,\n  height: 80,\n  type: sig.type || 'signature',\n  signer: sig.signer || 'Người ký',\n  reason: sig.reason || 'Vị trí chữ ký',\n  keywords: sig.keywords || []\n}));\n\nreturn {\n  json: {\n    documentId: documentId,\n    documentPath: documentPath,\n    detectedPositions: positionsWithCoordinates,\n    totalSignatures: positionsWithCoordinates.length,\n    aiRawResponse: aiResponse\n  }\n};"
+      },
+      "id": "code-parse-positions",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ \n  success: true, \n  message: 'Đã nhận diện vị trí chữ ký thành công', \n  documentId: $json.documentId,\n  documentPath: $json.documentPath,\n  detectedPositions: $json.detectedPositions,\n  totalSignatures: $json.totalSignatures\n}) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1620, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ \n  success: false, \n  message: 'Không tìm thấy tài liệu',\n  documentId: $json.body?.documentId || ''\n}) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "respond-not-found",
+      "name": "Respond Not Found",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get Document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Document": {
+      "main": [
+        [
+          {
+            "node": "IF Document Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Document Exists": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Set Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Context": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Detect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Detect": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-25T01:50:00.000Z",
+  "versionId": "4"
+}
