@@ -1,0 +1,220 @@
+{
+  "name": "E-Signature - PDF Split & Merge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/pdf-merge",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-merge",
+      "name": "Webhook - PDF Merge",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 200],
+      "webhookId": "e-signature-pdf-merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process merge request\nconst body = $input.item.json.body;\nreturn {\n  documentIds: body.documentIds,\n  outputTitle: body.outputTitle || 'Merged Document',\n  requestedAt: new Date().toISOString()\n};"
+      },
+      "id": "code-merge",
+      "name": "Code - Process Merge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"PDF_MERGE_REQUESTED\",\n  \"details\": {\n    \"documentIds\": {{ JSON.stringify($json.documentIds) }},\n    \"outputTitle\": \"{{ $json.outputTitle }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-merge",
+      "name": "HTTP - Log Merge Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Merge queued', documentIds: $('Code - Process Merge').item.json.documentIds }) }}",
+        "options": {}
+      },
+      "id": "respond-merge",
+      "name": "Respond - Merge Queued",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/pdf-split",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-split",
+      "name": "Webhook - PDF Split",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 450],
+      "webhookId": "e-signature-pdf-split"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process split request\nconst body = $input.item.json.body;\nreturn {\n  documentId: body.documentId,\n  pageRanges: body.pageRanges, // [{start: 1, end: 5}, {start: 6, end: 10}]\n  requestedAt: new Date().toISOString()\n};"
+      },
+      "id": "code-split",
+      "name": "Code - Process Split",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 450]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"PDF_SPLIT_REQUESTED\",\n  \"documentId\": \"{{ $json.documentId }}\",\n  \"details\": {\n    \"pageRanges\": {{ JSON.stringify($json.pageRanges) }}\n  }\n}",
+        "options": {}
+      },
+      "id": "log-split",
+      "name": "HTTP - Log Split Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 450]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Split queued', documentId: $('Code - Process Split').item.json.documentId, pageRanges: $('Code - Process Split').item.json.pageRanges }) }}",
+        "options": {}
+      },
+      "id": "respond-split",
+      "name": "Respond - Split Queued",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 450]
+    }
+  ],
+  "connections": {
+    "Webhook - PDF Merge": {
+      "main": [
+        [
+          {
+            "node": "Code - Process Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Process Merge": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Merge Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Merge Request": {
+      "main": [
+        [
+          {
+            "node": "Respond - Merge Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - PDF Split": {
+      "main": [
+        [
+          {
+            "node": "Code - Process Split",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Process Split": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Split Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Split Request": {
+      "main": [
+        [
+          {
+            "node": "Respond - Split Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "pdf"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2025-12-07T00:00:00.000Z",
+  "versionId": "1"
+}

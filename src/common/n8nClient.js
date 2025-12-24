@@ -16,7 +16,14 @@ class N8nClient {
    * @param {string} method - HTTP method (GET, POST, etc.)
    */
   async triggerWebhook(webhookPath, data = {}, method = 'POST') {
-    const url = `${this.baseUrl}/webhook/${webhookPath}`;
+
+    const url = `${this.baseUrl}/webhook/${webhookPath}`.replace(/([^:]\/)\/+/g, "$1"); // Fix double slashes
+    
+    console.log('=== N8N WEBHOOK TRIGGER ===');
+    console.log('URL:', url);
+    console.log('Method:', method);
+    console.log('Data keys:', Object.keys(data));
+
     
     const options = {
       method,
@@ -29,13 +36,27 @@ class N8nClient {
       options.body = JSON.stringify(data);
     }
 
-    const response = await fetch(url, options);
-    
-    if (!response.ok) {
-      throw new Error(`N8N webhook error: ${response.status} ${response.statusText}`);
-    }
 
-    return response.json();
+    try {
+      const response = await fetch(url, options);
+      
+      console.log('N8N Response status:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('N8N Error response:', errorText);
+        throw new Error(`N8N webhook error: ${response.status} ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('N8N Response success:', result);
+      return result;
+    } catch (error) {
+      console.error('=== N8N WEBHOOK ERROR ===');
+      console.error('Error:', error.message);
+      console.error('Stack:', error.stack);
+      throw error;
+    }
   }
 
   /**

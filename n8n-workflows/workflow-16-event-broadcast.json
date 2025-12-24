@@ -1,0 +1,141 @@
+{
+  "name": "E-Signature - Event Broadcasting",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/broadcast-event",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Broadcast Event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-broadcast-event"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/broadcast-event",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"requestId\": \"{{ $json.body.requestId }}\",\n  \"eventType\": \"{{ $json.body.eventType }}\",\n  \"data\": {{ JSON.stringify($json.body.data || {}) }}\n}",
+        "options": {}
+      },
+      "id": "http-broadcast",
+      "name": "HTTP - Broadcast via WebSocket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/audit",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"eventType\": \"EVENT_BROADCASTED\",\n  \"details\": {\n    \"requestId\": \"{{ $('Webhook - Broadcast Event').item.json.body.requestId }}\",\n    \"eventType\": \"{{ $('Webhook - Broadcast Event').item.json.body.eventType }}\",\n    \"broadcasted_at\": \"{{ new Date().toISOString() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "log-audit",
+      "name": "HTTP - Log Audit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, broadcasted: true, eventType: $('Webhook - Broadcast Event').item.json.body.eventType }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Broadcast Event": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Broadcast via WebSocket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Broadcast via WebSocket": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Log Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Log Audit": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "realtime"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-07T00:00:00.000Z",
+  "versionId": "1"
+}

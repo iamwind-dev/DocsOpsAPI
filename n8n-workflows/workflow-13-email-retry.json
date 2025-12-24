@@ -1,0 +1,444 @@
+{
+  "name": "E-Signature - Retry Email Delivery",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Cron - Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/failed-notifications",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-get-failed",
+      "name": "HTTP - Get Failed Notifications",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ],
+          "number": [
+            {
+              "value1": "={{ $json.data.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "if-has-failed",
+      "name": "IF - Has Failed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split-notifications",
+      "name": "Split Notifications",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [910, 200]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/notifications/{{ $json.id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"retrying\"\n}",
+        "options": {}
+      },
+      "id": "http-mark-retrying",
+      "name": "HTTP - Mark Retrying",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1130, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $('Split Notifications').item.json.recipient_email }}",
+        "subject": "={{ $('Split Notifications').item.json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $('Split Notifications').item.json.content }}",
+        "options": {}
+      },
+      "id": "retry-send",
+      "name": "Retry Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1350, 200],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.error === undefined }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-retry-success",
+      "name": "IF - Retry Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1570, 200]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/notifications/{{ $('Split Notifications').item.json.id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"sent\"\n}",
+        "options": {}
+      },
+      "id": "http-mark-sent",
+      "name": "HTTP - Mark Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1790, 100]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature-ext/internal/notifications/{{ $('Split Notifications').item.json.id }}/status",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"failed\",\n  \"errorMessage\": \"{{ $json.error?.message || 'Retry failed' }}\"\n}",
+        "options": {}
+      },
+      "id": "http-mark-failed-again",
+      "name": "HTTP - Mark Failed Again",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1790, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if max retries reached\nconst notification = $('Split Notifications').item.json;\nif (notification.retry_count >= notification.max_retries - 1) {\n  return { alertAdmin: true, notification };\n}\nreturn { alertAdmin: false, notification };"
+      },
+      "id": "check-max-retries",
+      "name": "Code - Check Max Retries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2010, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.alertAdmin }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-alert-admin",
+      "name": "IF - Alert Admin",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2230, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $env.ADMIN_EMAIL }}",
+        "subject": "⚠️ Email Delivery Failed After Max Retries",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<body>\n  <h2>Email Delivery Failed</h2>\n  <p>The following notification failed after {{ $json.notification.max_retries }} retries:</p>\n  <p><strong>Recipient:</strong> {{ $json.notification.recipient_email }}</p>\n  <p><strong>Subject:</strong> {{ $json.notification.subject }}</p>\n  <p><strong>Event Type:</strong> {{ $json.notification.event_type }}</p>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-admin-alert",
+      "name": "Send Admin Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [2450, 250],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no-op-done",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2670, 300]
+    },
+    {
+      "parameters": {},
+      "id": "no-op-none",
+      "name": "No Failed Notifications",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [910, 400]
+    }
+  ],
+  "connections": {
+    "Cron - Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Failed Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Failed Notifications": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Failed": {
+      "main": [
+        [
+          {
+            "node": "Split Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Failed Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Notifications": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Mark Retrying",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Mark Retrying": {
+      "main": [
+        [
+          {
+            "node": "Retry Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry Send Email": {
+      "main": [
+        [
+          {
+            "node": "IF - Retry Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Retry Success": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Mark Sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP - Mark Failed Again",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Mark Sent": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Mark Failed Again": {
+      "main": [
+        [
+          {
+            "node": "Code - Check Max Retries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Check Max Retries": {
+      "main": [
+        [
+          {
+            "node": "IF - Alert Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Alert Admin": {
+      "main": [
+        [
+          {
+            "node": "Send Admin Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Admin Alert": {
+      "main": [
+        [
+          {
+            "node": "Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    },
+    {
+      "name": "cron"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-12-07T00:00:00.000Z",
+  "versionId": "1"
+}

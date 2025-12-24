@@ -31,11 +31,13 @@ router.post(
   documentController.uploadDocumentsToQueue
 );
 
+
 // Generic routes - PHẢI ĐẶT SAU các specific routes
 router.get('/', documentController.getDocuments); // Get documents via n8n
 router.get('/:id', documentController.getDocument);
 router.post('/', documentController.createDocument);
 router.put('/:id', documentController.updateDocument);
 router.delete('/:id', authSupabase, documentController.deleteDocument); // Delete document (soft delete - update status)
+
 
 module.exports = router;

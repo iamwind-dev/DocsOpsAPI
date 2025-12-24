@@ -1,4 +1,5 @@
 const { catchAsync, response, n8nClient } = require('../../common');
+
 const { supabaseAdmin } = require('../../config/supabase');
 const { ApiError, httpStatus } = require('../../common');
 
@@ -229,7 +230,6 @@ const getDashboardStats = catchAsync(async (req, res) => {
     .from('documents')
     .select('*', { count: 'exact', head: true })
     .eq('owner_id', ownerId)
-    .neq('status', 'deleted')
     .eq('status', 'CHOKY');
 
   // 3. Tài liệu có rủi ro (sensitivity_level = CONFIDENTIAL hoặc RESTRICTED) - không bao gồm deleted
@@ -272,6 +272,7 @@ const getDashboardStats = catchAsync(async (req, res) => {
 
 /**
  * Get all documents (via n8n)
+
  */
 const getDocuments = catchAsync(async (req, res) => {
   // Trigger n8n webhook để lấy documents
@@ -306,6 +307,7 @@ const updateDocument = catchAsync(async (req, res) => {
 });
 
 /**
+
  * Delete document (soft delete - update status to deleted)
  */
 const deleteDocument = catchAsync(async (req, res) => {
@@ -356,6 +358,9 @@ const deleteDocumentN8n = catchAsync(async (req, res) => {
   return response.success(res, result, 'Document deleted successfully');
 });
 
+
+
+
 /**
  * Upload documents to polling queue
  * POST /documents/upload-to-queue
@@ -375,6 +380,34 @@ const uploadDocumentsToQueue = catchAsync(async (req, res) => {
   const ownerId = req.user.id;
   const uploadedFiles = [];
   const errors = [];
+
+  // Ensure user profile exists (required for foreign key constraint)
+  try {
+    const { data: existingProfile } = await supabaseAdmin
+      .from('user_profiles')
+      .select('user_id')
+      .eq('user_id', ownerId)
+      .single();
+
+    if (!existingProfile) {
+      console.log('Creating user profile for:', ownerId);
+      const { error: profileError } = await supabaseAdmin
+        .from('user_profiles')
+        .insert({
+          user_id: ownerId,
+          email: req.user.email,
+          role: 'user'
+        });
+
+      if (profileError) {
+        console.error('Failed to create user profile:', profileError);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to create user profile');
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    console.error('Error checking user profile:', error);
+  }
 
   // Bucket name - đã có sẵn
   const bucketName = 'polling_queue';
@@ -605,4 +638,5 @@ module.exports = {
   uploadDocumentsToQueue,
   getNotifications,
   markAllNotificationsAsRead,
+
 };
