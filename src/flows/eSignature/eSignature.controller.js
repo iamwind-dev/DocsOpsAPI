@@ -387,19 +387,61 @@ const getSignatureRequest = catchAsync(async (req, res) => {
   const userId = req.user.id;
   const userEmail = req.user.email;
 
+  /* 
+    Join auth.users thường không hoạt động do khác schema.
+    Ta sẽ fetch thủ công thông tin creator.
+  */
   const { data: request, error } = await supabaseAdmin
     .from('signature_requests')
     .select(`
       *,
       document:documents(*),
-      signers:signature_request_signers(*),
-      creator:auth.users(id, email)
+      signers:signature_request_signers(*)
     `)
     .eq('id', id)
     .single();
 
   if (error || !request) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Signature request not found');
+  }
+
+  // Create mutable response object
+  const responseData = { ...request };
+  
+  // Default creator info
+  responseData.creator = {
+      id: request.creator_id,
+      email: 'Retrieving...' // Default placeholder
+  };
+
+  // Fetch creator info manually
+  if (request.creator_id) {
+    try {
+      // 1. Try getUserById
+      const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(request.creator_id);
+      
+      if (!userError && userData && userData.user) {
+         responseData.creator = {
+             id: request.creator_id,
+             email: userData.user.email
+         };
+      } else {
+         // 2. Fallback listUsers
+         const { data: listData } = await supabaseAdmin.auth.admin.listUsers(); // Default perPage is 50, might need more but usually okay for dev
+         const found = listData?.users?.find(u => u.id === request.creator_id);
+         if (found) {
+             responseData.creator = {
+                 id: request.creator_id,
+                 email: found.email
+             };
+         } else {
+             responseData.creator.email = 'Unknown/Deleted User';
+         }
+      }
+    } catch (e) {
+      console.error('Failed to fetch creator info:', e);
+      responseData.creator.email = 'Error fetching user';
+    }
   }
 
   // Kiểm tra quyền xem: phải là creator hoặc signer
@@ -412,7 +454,7 @@ const getSignatureRequest = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'You do not have permission to view this request');
   }
 
-  return response.success(res, request, 'Signature request retrieved successfully');
+  return response.success(res, responseData, 'Signature request retrieved successfully');
 });
 
 /**
@@ -495,7 +537,7 @@ const updateSignatureRequestStatus = catchAsync(async (req, res) => {
  */
 const signDocument = catchAsync(async (req, res) => {
   const { documentId } = req.params;
-  const { pin, meta, requestId } = req.body;
+  const { pin, meta, requestId, position } = req.body;
   const userId = req.user.id;
   const userEmail = req.user.email;
 
@@ -515,7 +557,7 @@ const signDocument = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Document not found');
   }
 
-  // Lấy active signature của user
+  // Lấy active signature của user (Security info)
   const { data: userSignature, error: sigError } = await supabaseAdmin
     .from('user_signatures')
     .select('*')
@@ -526,6 +568,16 @@ const signDocument = catchAsync(async (req, res) => {
   if (sigError || !userSignature) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'You need to register a signature first');
   }
+  
+  // Lấy Signature Image URL từ bảng user_signature_images
+  const { data: signatureImageRecord } = await supabaseAdmin
+      .from('user_signature_images')
+      .select('image_url')
+      .eq('user_id', userId)
+      .eq('is_default', true)
+      .single();
+      
+  const sImage = signatureImageRecord?.image_url || userSignature.image_url; // Fallback to userSignature if merged in future
 
   // Verify PIN
   const pinHash = hashPin(pin);
@@ -539,12 +591,141 @@ const signDocument = catchAsync(async (req, res) => {
   // Create signature value using HMAC-SHA256
   const signatureValue = createSignature(documentHash, userSignature.secret_key);
 
+  // --- PDF PROCESSING START ---
+  let signedPdfUrl = null;
+  let newStoragePath = null;
+  
+  // Log debug
+  console.log('Processing Signature with Position:', position);
+  console.log('Document Storage Path:', document.storage_path);
+
+  if (position && document.storage_path) {
+      const PDFLib = require('pdf-lib');
+
+      // 1. Download original PDF from Supabase
+      console.log('Downloading original PDF...');
+      const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+        .from('documents')
+        .download(document.storage_path);
+
+      if (downloadError) {
+        console.error('Download original PDF error:', downloadError);
+        throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to download original PDF');
+      }
+
+      // 2. Load PDF
+      const pdfBuffer = await fileData.arrayBuffer();
+      const pdfDoc = await PDFLib.PDFDocument.load(pdfBuffer);
+      console.log('PDF Loaded. Pages:', pdfDoc.getPageCount());
+
+      // 3. Embed signature image
+      if (!sImage) {
+          throw new ApiError(httpStatus.BAD_REQUEST, 'User signature image missing (Please create a signature first)');
+      }
+      
+      console.log('Fetching signature image:', sImage);
+      const imageResponse = await fetch(sImage);
+      if (!imageResponse.ok) {
+          throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to fetch signature image');
+      }
+      
+      const imageBuffer = await imageResponse.arrayBuffer();
+      let embeddedImage;
+      try {
+        embeddedImage = await pdfDoc.embedPng(imageBuffer);
+      } catch (e) {
+        // Try JPG if PNG fails
+        try {
+          embeddedImage = await pdfDoc.embedJpg(imageBuffer);
+        } catch (e2) {
+          console.error('Failed to embed image:', e2);
+          throw new ApiError(httpStatus.BAD_REQUEST, 'Unsupported signature image format');
+        }
+      }
+
+      if (embeddedImage) {
+         // 4. Draw image on page
+         const pages = pdfDoc.getPages();
+         const pageIndex = (parseInt(position.page) || 1) - 1;
+         
+         if (pageIndex >= 0 && pageIndex < pages.length) {
+           const page = pages[pageIndex];
+           const { height: pageHeight } = page.getSize();
+           
+           const sigWidth = parseInt(position.width) || 150;
+           const sigHeight = parseInt(position.height) || 75;
+           const posX = parseInt(position.x) || 0;
+           const posY = parseInt(position.y) || 0;
+           
+           const sigY = pageHeight - posY - sigHeight;
+
+           console.log(`Drawing signature at: Page ${pageIndex + 1}, x=${posX}, y=${sigY} (OrigY=${posY})`);
+
+           page.drawImage(embeddedImage, {
+             x: posX,
+             y: sigY,
+             width: sigWidth,
+             height: sigHeight,
+           });
+
+           // 5. Save modified PDF
+           const pdfBytes = await pdfDoc.save();
+           
+           // 6. Upload new PDF
+           const fileName = document.storage_path.split('/').pop();
+           const nameWithoutExt = fileName.replace('.pdf', '');
+           // Timestamp ensures uniqueness
+           const newFileName = `${nameWithoutExt}_signed_${Date.now()}.pdf`;
+           const folder = document.storage_path.split('/').slice(0, -1).join('/');
+           newStoragePath = folder ? `${folder}/${newFileName}` : newFileName;
+
+           console.log('Uploading signed PDF to:', newStoragePath);
+
+           const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+             .from('documents')
+             .upload(newStoragePath, Buffer.from(pdfBytes), {
+               contentType: 'application/pdf',
+               upsert: false
+             });
+             
+           if (uploadError) {
+             console.error('Upload signed PDF error:', uploadError);
+             throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Failed to upload signed PDF');
+           }
+           
+           // Get Public URL
+           const { data: urlData } = supabaseAdmin.storage
+             .from('documents')
+             .getPublicUrl(newStoragePath);
+             
+           signedPdfUrl = urlData.publicUrl;
+           console.log('Signed PDF URL:', signedPdfUrl);
+           
+           // Update document to point to new file
+           // Update document size as well if possible, or just path
+           await supabaseAdmin.from('documents')
+             .update({ 
+               storage_path: newStoragePath,
+               update_at: new Date().toISOString()
+             })
+             .eq('id', documentId);
+         } else {
+             console.warn('Invalid page index:', pageIndex);
+         }
+      }
+  } else {
+      console.warn('No position or storage path provided', { position, storagePath: document.storage_path });
+  }
+  // --- PDF PROCESSING END ---
+
   // Prepare meta data
   const signatureMeta = {
     ...meta,
     ip: req.ip,
     user_agent: req.headers['user-agent'],
     signed_at: new Date().toISOString(),
+    signed_pdf_url: signedPdfUrl, // Lưu URL vào meta
+    signature_position: position
   };
 
   // Insert document signature
@@ -601,10 +782,10 @@ const signDocument = catchAsync(async (req, res) => {
           .update({ status: 'signed', updated_at: new Date().toISOString() })
           .eq('id', requestId);
 
-        // Update document status to 'signed'
+        // Update document status to 'signed' (đã update update_at ở trên nếu PDF process thành công)
         await supabaseAdmin
           .from('documents')
-          .update({ status: 'signed', updated_at: new Date().toISOString() })
+          .update({ status: 'signed', update_at: new Date().toISOString() })
           .eq('id', documentId);
       }
     }
@@ -616,11 +797,52 @@ const signDocument = catchAsync(async (req, res) => {
     request_id: requestId || null,
   });
 
+  // Trigger N8N Notification
+  if (requestId) {
+      try {
+          // Fetch creator info to send notification
+          const { data: reqData } = await supabaseAdmin
+              .from('signature_requests')
+              .select('creator_id')
+              .eq('id', requestId)
+              .single();
+
+          let creatorEmail = null;
+          if (reqData && reqData.creator_id) {
+               // Try getUserById
+               const { data: uData } = await supabaseAdmin.auth.admin.getUserById(reqData.creator_id);
+               if (uData && uData.user) {
+                   creatorEmail = uData.user.email;
+               } else {
+                   // Fallback listUsers
+                   const { data: listUsers } = await supabaseAdmin.auth.admin.listUsers();
+                   const found = listUsers?.users?.find(u => u.id === reqData.creator_id);
+                   if (found) creatorEmail = found.email;
+               }
+          }
+
+          console.log('Triggering Notify Webhook for Request:', requestId);
+          // Fire and forget (don't await to block response, or await if critical)
+          // We await inside try/catch to not block success response
+          n8nClient.triggerWebhook('e-signature/notify-signed', {
+              requestId: requestId,
+              signerEmail: userEmail,
+              creatorEmail: creatorEmail,
+              signedPdfUrl: signedPdfUrl
+          }).catch(err => console.error('Background Webhook Error:', err));
+          
+      } catch (e) {
+          console.error('Error preparing notification:', e);
+      }
+  }
+
   return response.success(res, {
     id: docSignature.id,
-    documentId: docSignature.document_id,
-    documentHash: docSignature.document_hash,
-    createdAt: docSignature.created_at,
+    signedPdfUrl: signedPdfUrl, // Trả về URL cho frontend
+    document: {
+        id: document.id,
+        url: signedPdfUrl || null
+    }
   }, 'Document signed successfully');
 });
 
@@ -839,7 +1061,9 @@ const receiveSignedFile = catchAsync(async (req, res) => {
     .from('documents')
     .update({ 
       status: 'signed',
-      updated_at: new Date().toISOString(),
+
+      update_at: new Date().toISOString(),
+
       // Có thể lưu signed file URL vào storage_path hoặc field riêng
     })
     .eq('id', documentId);

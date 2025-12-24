@@ -16,12 +16,14 @@ class N8nClient {
    * @param {string} method - HTTP method (GET, POST, etc.)
    */
   async triggerWebhook(webhookPath, data = {}, method = 'POST') {
+
     const url = `${this.baseUrl}/webhook/${webhookPath}`.replace(/([^:]\/)\/+/g, "$1"); // Fix double slashes
     
     console.log('=== N8N WEBHOOK TRIGGER ===');
     console.log('URL:', url);
     console.log('Method:', method);
     console.log('Data keys:', Object.keys(data));
+
     
     const options = {
       method,
@@ -33,6 +35,7 @@ class N8nClient {
     if (method !== 'GET') {
       options.body = JSON.stringify(data);
     }
+
 
     try {
       const response = await fetch(url, options);

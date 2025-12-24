@@ -1,0 +1,169 @@
+{
+  "name": "E-Signature - Notify Sender After Sign",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "e-signature/notify-signed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - Signature Completed",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "e-signature-notify-signed"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BACKEND_URL }}/api/v1/e-signature/internal/signature-requests/{{ $json.body.requestId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-get-request",
+      "name": "HTTP - Get Request Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [470, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.success }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-request-found",
+      "name": "IF - Request Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [690, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM_EMAIL }}",
+        "toEmail": "={{ $('HTTP - Get Request Details').item.json.data.creator.email }}",
+        "subject": "Document Signed: {{ $('HTTP - Get Request Details').item.json.data.document.title }}",
+        "emailFormat": "html",
+        "html": "<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .container { max-width: 600px; margin: 0 auto; padding: 20px; }\n    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }\n    .content { padding: 20px; background: #f9fafb; border-radius: 0 0 8px 8px; }\n    .success-icon { font-size: 48px; margin-bottom: 10px; }\n    .button { display: inline-block; background: #4F46E5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 10px 5px; }\n    .button-green { background: #10b981; }\n    .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }\n    .info-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 16px 0; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <div class=\"success-icon\">✅</div>\n      <h1>Tài liệu đã được ký!</h1>\n    </div>\n    <div class=\"content\">\n      <p>Xin chào,</p>\n      \n      <p>Chúng tôi xin thông báo rằng tài liệu của bạn đã được ký thành công.</p>\n      \n      <div class=\"info-box\">\n        <p><strong>📄 Tài liệu:</strong> {{ $('HTTP - Get Request Details').item.json.data.document.title }}</p>\n        <p><strong>👤 Người ký:</strong> {{ $('Webhook - Signature Completed').item.json.body.signerEmail }}</p>\n        <p><strong>📅 Thời gian:</strong> {{ new Date().toLocaleString('vi-VN') }}</p>\n      </div>\n      \n      <p>Bạn có thể xem và tải xuống tài liệu đã ký:</p>\n      \n      <div style=\"text-align: center;\">\n        <a href=\"{{ $env.FRONTEND_URL }}/esignature\" class=\"button\">Xem trong hệ thống</a>\n        \n        {{ $('Webhook - Signature Completed').item.json.body.signedPdfUrl ? '<a href=\"' + $('Webhook - Signature Completed').item.json.body.signedPdfUrl + '\" class=\"button button-green\">Tải tài liệu đã ký</a>' : '' }}\n      </div>\n      \n      <p style=\"margin-top: 30px; color: #666;\">Cảm ơn bạn đã sử dụng dịch vụ chữ ký điện tử của chúng tôi.</p>\n    </div>\n    <div class=\"footer\">\n      <p>This is an automated message from DocsOps E-Signature System</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email to Creator",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1130, 200],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials-id",
+          "name": "SMTP Credentials"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Notification sent to creator' }) }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1350, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, message: 'Request not found' }) }}",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond - Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [910, 400]
+    }
+  ],
+  "connections": {
+    "Webhook - Signature Completed": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Get Request Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Get Request Details": {
+      "main": [
+        [
+          {
+            "node": "IF - Request Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Request Found": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Creator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Creator": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "e-signature"
+    }
+  ],
+  "triggerCount": 1
+}
