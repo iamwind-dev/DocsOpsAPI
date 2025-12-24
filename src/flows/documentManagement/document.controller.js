@@ -18,8 +18,7 @@ const getUserDocuments = catchAsync(async (req, res) => {
     .select('*')
     .eq('owner_id', ownerId)
     .neq('status', 'deleted')
-    .order('update_at', { ascending: false })
-    .limit(5);
+    .order('update_at', { ascending: false });
 
   if (error) {
     console.error('Error fetching documents:', error);
@@ -58,6 +57,7 @@ const searchDocuments = catchAsync(async (req, res) => {
     .from('documents')
     .select('*')
     .eq('owner_id', ownerId)
+    .neq('status', 'deleted')
     .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`)
     .order('update_at', { ascending: false })
     .limit(20);
@@ -555,6 +555,75 @@ const uploadDocumentsToQueue = catchAsync(async (req, res) => {
   );
 });
 
+/**
+ * Get user notifications
+ */
+const getNotifications = catchAsync(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Authentication required');
+  }
+
+  const ownerId = req.user.id;
+  console.log(`[getNotifications] Request from user ID: ${ownerId}`);
+
+  // Lấy tất cả notifications trước để debug
+  const { data: allNotifications, error: allError } = await supabaseAdmin
+    .from('notification')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  console.log(`[getNotifications] All notifications in DB:`, allNotifications?.length || 0);
+  if (allNotifications && allNotifications.length > 0) {
+    console.log(`[getNotifications] Sample owner_ids:`, allNotifications.slice(0, 3).map(n => ({ id: n.id, owner_id: n.owner_id })));
+  }
+
+  // Lấy notifications của user
+  const { data, error } = await supabaseAdmin
+    .from('notification')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching notifications:', error);
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi lấy thông báo');
+  }
+
+  console.log(`[getNotifications] Found ${data?.length || 0} notifications for owner ${ownerId}`);
+  if (data && data.length > 0) {
+    console.log(`[getNotifications] Notifications:`, data.map(n => ({ id: n.id, notification: n.notification?.substring(0, 50), processing: n.processing })));
+  } else {
+    console.log(`[getNotifications] No notifications found for owner ${ownerId}. Checking if owner_id matches...`);
+  }
+  
+  return response.success(res, { notifications: data || [] }, 'Lấy thông báo thành công');
+});
+
+/**
+ * Mark all notifications as read
+ */
+const markAllNotificationsAsRead = catchAsync(async (req, res) => {
+  if (!req.user) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Authentication required');
+  }
+
+  const ownerId = req.user.id;
+
+  const { data, error } = await supabaseAdmin
+    .from('notification')
+    .update({ processing: 'done' })
+    .eq('owner_id', ownerId)
+    .eq('processing', 'sent')
+    .select();
+
+  if (error) {
+    console.error('Error updating notifications:', error);
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi cập nhật thông báo');
+  }
+
+  return response.success(res, { notifications: data || [] }, 'Đã đánh dấu tất cả thông báo là đã đọc');
+});
+
 module.exports = {
   getUserDocuments,
   getDashboardStats,
@@ -567,5 +636,7 @@ module.exports = {
   updateDocument,
   deleteDocument,
   uploadDocumentsToQueue,
+  getNotifications,
+  markAllNotificationsAsRead,
 
 };
