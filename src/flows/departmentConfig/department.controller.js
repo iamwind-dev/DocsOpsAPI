@@ -2,6 +2,17 @@ const { catchAsync, response } = require('../../common');
 const { supabaseAdmin } = require('../../config/supabase');
 const { ApiError, httpStatus } = require('../../common');
 
+// 7 phòng ban mặc định - KHÔNG ĐỔI
+const DEFAULT_DEPARTMENTS = [
+  { category_key: 'Finance & Tax', department_name: 'Phòng Tài chính - Kế toán' },
+  { category_key: 'Legal & Contracts', department_name: 'Phòng Pháp chế' },
+  { category_key: 'HR & Admin', department_name: 'Phòng Hành chính - Nhân sự' },
+  { category_key: 'Sales & CRM', department_name: 'Phòng Kinh doanh' },
+  { category_key: 'Projects & Tech', department_name: 'Phòng Kỹ thuật & Dự án' },
+  { category_key: 'Marketing', department_name: 'Phòng Marketing' },
+  { category_key: 'Other', department_name: 'Bộ phận Quản lý chung' },
+];
+
 /**
  * Get department configs for current user
  * GET /department-configs
@@ -12,25 +23,27 @@ const getDepartmentConfigs = catchAsync(async (req, res) => {
   }
 
   const ownerId = req.user.id;
+  console.log('GET departments for owner:', ownerId);
 
   const { data, error } = await supabaseAdmin
     .from('department_configs')
     .select('*')
     .eq('owner_id', ownerId)
-    .order('department_name', { ascending: true });
+    .order('id', { ascending: true });
 
   if (error) {
     console.error('Error fetching department configs:', error);
     throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi lấy danh sách phòng ban');
   }
 
+  console.log('Found', data?.length || 0, 'departments');
   return response.success(res, { departments: data || [] }, 'Lấy danh sách phòng ban thành công');
 });
 
 /**
- * Update or create department configs
+ * Create or update department configs for user
  * POST /department-configs
- * Body: { departments: [{ department_name, category_key, notification_email }] }
+ * Body: { departments: [{ category_key, department_name, notification_email }] }
  */
 const updateDepartmentConfigs = catchAsync(async (req, res) => {
   if (!req.user) {
@@ -40,125 +53,115 @@ const updateDepartmentConfigs = catchAsync(async (req, res) => {
   const ownerId = req.user.id;
   const { departments } = req.body;
 
-  console.log('Update department configs request:', {
-    ownerId,
-    departmentsCount: departments?.length,
-    departments: departments,
-  });
+  console.log('=== POST Department Configs ===');
+  console.log('Owner ID:', ownerId);
+  console.log('Input departments:', departments?.length);
 
-  if (!departments || !Array.isArray(departments)) {
+  if (!departments || !Array.isArray(departments) || departments.length === 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Danh sách phòng ban không hợp lệ');
   }
 
-  const results = [];
-  const errors = [];
+  // Bước 1: Kiểm tra user đã có departments chưa
+  const { data: existingDepts, error: checkError } = await supabaseAdmin
+    .from('department_configs')
+    .select('id, category_key, notification_email')
+    .eq('owner_id', ownerId);
 
-  for (const dept of departments) {
-    console.log('Processing department:', dept);
-    try {
-      const { department_name, category_key, notification_email } = dept;
+  if (checkError) {
+    console.error('Check error:', checkError);
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi kiểm tra dữ liệu');
+  }
 
-      if (!department_name || !category_key) {
-        errors.push({
-          department_name: department_name || 'N/A',
-          error: 'department_name và category_key là bắt buộc',
-        });
-        continue;
-      }
+  const existingCount = existingDepts?.length || 0;
+  console.log('Existing departments count:', existingCount);
 
-      // Nếu có id, update; nếu không có, insert
-      if (dept.id) {
-        console.log(`Updating department ${department_name} with id ${dept.id}`);
-        // Update existing record - dùng maybeSingle để tránh lỗi khi không tìm thấy
-        const updatePayload = {
-          notification_email: notification_email || null,
-        };
-        // Chỉ thêm updated_at nếu column tồn tại (database sẽ tự động set nếu có trigger)
-        
-        const { data: updateData, error: updateError } = await supabaseAdmin
-          .from('department_configs')
-          .update(updatePayload)
-          .eq('id', dept.id)
-          .eq('owner_id', ownerId) // Đảm bảo chỉ update của chính user này
-          .select()
-          .maybeSingle();
+  // Bước 2: Xử lý theo trường hợp
+  if (existingCount === 0) {
+    // === TRƯỜNG HỢP 1: User CHƯA có data -> INSERT 7 phòng ban ===
+    console.log('>>> INSERT 7 phòng ban mới cho user');
 
-        if (updateError) {
-          console.error('Update error for', department_name, ':', updateError);
-          errors.push({
-            department_name,
-            error: updateError.message || 'Lỗi khi cập nhật',
-          });
-        } else if (updateData) {
-          console.log('Successfully updated:', updateData);
-          results.push(updateData);
-        } else {
-          // Không tìm thấy record để update - có thể id không đúng hoặc không thuộc về user này
-          console.error(`No record found to update for id ${dept.id}, department: ${department_name}`);
-          errors.push({
-            department_name,
-            error: 'Không tìm thấy bản ghi để cập nhật. Có thể ID không đúng hoặc không thuộc về tài khoản của bạn.',
-          });
-        }
+    // Tạo data từ input (lấy email user nhập) + default departments
+    const insertData = DEFAULT_DEPARTMENTS.map(defaultDept => {
+      // Tìm email user đã nhập cho phòng ban này
+      const userInput = departments.find(d => d.category_key === defaultDept.category_key);
+      return {
+        owner_id: ownerId,
+        category_key: defaultDept.category_key,
+        department_name: defaultDept.department_name,
+        notification_email: userInput?.notification_email || null,
+      };
+    });
+
+    console.log('Insert data:', JSON.stringify(insertData, null, 2));
+
+    // Insert từng cái một để tránh lỗi batch
+    const results = [];
+    const errors = [];
+
+    for (const dept of insertData) {
+      const { data: inserted, error: insertError } = await supabaseAdmin
+        .from('department_configs')
+        .insert(dept)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Insert error for', dept.category_key, ':', insertError.message);
+        errors.push({ category_key: dept.category_key, error: insertError.message });
       } else {
-        console.log(`Inserting new department ${department_name} with category ${category_key}`);
-        // Insert new record (chỉ khi chưa có id)
-        const { data: insertData, error: insertError } = await supabaseAdmin
+        console.log('Inserted:', dept.category_key);
+        results.push(inserted);
+      }
+    }
+
+    if (results.length === 0) {
+      throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Không thể tạo phòng ban: ${errors[0]?.error}`);
+    }
+
+    return response.success(res, {
+      action: 'insert',
+      updated: results,
+      failed: errors.length > 0 ? errors : undefined,
+      total: 7,
+      success: results.length,
+    }, `Đã tạo ${results.length}/7 phòng ban`);
+
+  } else {
+    // === TRƯỜNG HỢP 2: User ĐÃ có data -> UPDATE email ===
+    console.log('>>> UPDATE email cho phòng ban đã có');
+
+    const results = [];
+    const errors = [];
+
+    for (const inputDept of departments) {
+      const existing = existingDepts.find(e => e.category_key === inputDept.category_key);
+
+      if (existing) {
+        // Update email
+        const { data: updated, error: updateError } = await supabaseAdmin
           .from('department_configs')
-          .insert({
-            owner_id: ownerId,
-            department_name,
-            category_key,
-            notification_email: notification_email || null,
-          })
+          .update({ notification_email: inputDept.notification_email || null })
+          .eq('id', existing.id)
           .select()
           .single();
 
-        if (insertError) {
-          console.error('Insert error for', department_name, ':', insertError);
-          errors.push({
-            department_name,
-            error: insertError.message || 'Lỗi khi tạo mới',
-          });
-        } else if (insertData) {
-          console.log('Successfully inserted:', insertData);
-          results.push(insertData);
+        if (updateError) {
+          console.error('Update error:', updateError.message);
+          errors.push({ category_key: inputDept.category_key, error: updateError.message });
         } else {
-          console.error('Insert returned no data for', department_name);
-          errors.push({
-            department_name,
-            error: 'Không thể tạo bản ghi mới',
-          });
+          results.push(updated);
         }
       }
-
-    } catch (error) {
-      console.error('Error processing department:', error);
-      errors.push({
-        department_name: dept.department_name || 'N/A',
-        error: error.message || 'Unknown error',
-      });
     }
-  }
 
-  if (results.length === 0 && errors.length > 0) {
-    throw new ApiError(
-      httpStatus.INTERNAL_SERVER_ERROR,
-      'Không thể cập nhật phòng ban',
-      { errors }
-    );
-  }
-
-  return response.success(
-    res,
-    {
+    return response.success(res, {
+      action: 'update',
       updated: results,
       failed: errors.length > 0 ? errors : undefined,
       total: departments.length,
       success: results.length,
-    },
-    `Đã cập nhật ${results.length}/${departments.length} phòng ban`
-  );
+    }, `Đã cập nhật ${results.length} phòng ban`);
+  }
 });
 
 module.exports = {
