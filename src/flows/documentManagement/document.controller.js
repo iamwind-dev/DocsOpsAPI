@@ -1,4 +1,10 @@
-const { catchAsync, response, n8nClient } = require('../../common');
+const { catchAsync, response, n8nClient, constants } = require('../../common');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const { ExifTool } = require("exiftool-vendored");
+const exiftool = new ExifTool();
+const axios = require('axios');
 
 const { supabaseAdmin } = require('../../config/supabase');
 const { ApiError, httpStatus } = require('../../common');
@@ -624,6 +630,160 @@ const markAllNotificationsAsRead = catchAsync(async (req, res) => {
   return response.success(res, { notifications: data || [] }, 'Đã đánh dấu tất cả thông báo là đã đọc');
 });
 
+
+
+/**
+ * HÀM BỔ TRỢ: Tự động trích xuất ngày tạo gốc từ mọi loại file
+ */
+const extractCreationDate = async (fileBuffer, originalName) => {
+  const tempFilePath = path.join(os.tmpdir(), `temp_${Date.now()}_${originalName}`);
+  
+  try {
+    await fs.promises.writeFile(tempFilePath, fileBuffer);
+    const tags = await exiftool.read(tempFilePath);
+    const dateValue = tags.CreateDate || tags.DateTimeOriginal || tags.ContentCreated || tags.ModifyDate;
+
+    if (dateValue && dateValue.toDate) {
+      return dateValue.toDate();
+    } else if (typeof dateValue === 'string') {
+        return new Date(dateValue);
+    }
+    
+    return new Date(); 
+  } catch (error) {
+    console.error("⚠️ Lỗi đọc Metadata:", error.message);
+    return new Date(); 
+  } finally {
+    try {
+      if (fs.existsSync(tempFilePath)) {
+        await fs.promises.unlink(tempFilePath);
+      }
+    } catch (e) { }
+  }
+};
+
+/**
+ * 1. DOWNLOAD DOCUMENT (Secure Version)
+ */
+const requestDownloadUrl = catchAsync(async (req, res) => {
+  const { documentId, userId } = req.body; // or req.user.id if authenticated
+
+  const finalUserId = userId || (req.user ? req.user.id : null);
+
+  if (!documentId || !finalUserId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Thiếu thông tin: documentId hoặc userId');
+  }
+
+  // Tra cứu Database
+  const { data: docInfo, error: dbError } = await supabaseAdmin
+    .from('documents')
+    .select('storage_path, title')
+    .eq('id', documentId)
+    .single();
+
+  if (dbError || !docInfo) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Không tìm thấy file trong hệ thống.');
+  }
+
+  // Ghi Log Audit
+  await supabaseAdmin.from('audit_logs').insert([{
+    user_id: finalUserId,
+    action: 'download',
+    resource_type: 'documents',
+    resource_id: documentId,
+    details: { filename: docInfo.title },
+    ip_address: req.ip,
+    created_at: new Date().toISOString()
+  }]);
+
+  // Tạo Signed URL
+  const { data, error: storageError } = await supabaseAdmin.storage
+    .from('documents')
+    .createSignedUrl(docInfo.storage_path, 60);
+
+  if (storageError || !data) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'File vật lý không tồn tại trên Storage.');
+  }
+
+  return response.success(res, { downloadUrl: data.signedUrl }, 'Tạo link download thành công');
+});
+
+/**
+ * 2. UPLOAD DOCUMENT (Smart Agent Version)
+ */
+const uploadDocumentSmart = catchAsync(async (req, res) => {
+  const file = req.file; // From multer single('file')
+  const { userId } = req.body;
+  const finalUserId = userId || (req.user ? req.user.id : null);
+
+  if (!file || !finalUserId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Thiếu file hoặc userId');
+  }
+
+  console.log(`📂 Đang phân tích metadata file: ${file.originalname}...`);
+  const detectedDate = await extractCreationDate(file.buffer, file.originalname);
+  console.log(`📅 Ngày gốc tìm thấy: ${detectedDate.toISOString()}`);
+
+  // Call N8N
+  let n8nResult = { is_old: false };
+  try {
+    // Assuming n8nClient can handle this path or we use basic axios if it expects full url
+    // For safety, let's use n8nClient.triggerWebhook if we know the path suffix 'webhook/check-date' maps correctly.
+    // Or we use the exact path from audit-tracking-main if it's external.
+    // If n8nClient.triggerWebhook uses POST by default:
+    const result = await n8nClient.triggerWebhook('webhook/check-date', {
+       dateToCheck: detectedDate.toISOString()
+    });
+    // If result contains the data directly
+    n8nResult = result || { is_old: false };
+    console.log(`🤖 n8n phản hồi: ${JSON.stringify(n8nResult)}`);
+  } catch (error) {
+    console.error("⚠️ Không gọi được n8n hoặc lỗi:", error.message); 
+    // Fallback to new
+  }
+
+  // Upload to Storage
+  const storagePath = `uploads/${finalUserId}/${Date.now()}_${file.originalname}`;
+  
+  const { error: storageError } = await supabaseAdmin.storage
+    .from('documents')
+    .upload(storagePath, file.buffer, {
+      contentType: file.mimetype,
+      upsert: false
+    });
+
+  if (storageError) {
+    console.error("Upload Storage Error:", storageError);
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi lưu file lên Storage.');
+  }
+
+  // Save to DB
+  const { data: dbData, error: dbError } = await supabaseAdmin
+    .from('documents')
+    .insert([{
+      owner_id: finalUserId,
+      title: file.originalname,
+      storage_path: storagePath,
+      mime_type: file.mimetype,
+      document_date: detectedDate,
+      status: n8nResult.is_old ? 'archived' : 'uploaded',
+      ai_analysis_result: n8nResult.is_old 
+          ? `⚠️ Tài liệu cũ (Ngày: ${detectedDate.toISOString().split('T')[0]}). Đã lưu kho.` 
+          : '✅ Tài liệu mới.'
+    }])
+    .select()
+    .single();
+
+  if (dbError) {
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'Lỗi khi lưu thông tin vào Database.');
+  }
+
+  return response.created(res, dbData, 'Upload và kiểm tra thành công');
+});
+
+// Clean up exiftool on exit
+process.on("exit", () => exiftool.end());
+
 module.exports = {
   getUserDocuments,
   getDashboardStats,
@@ -638,5 +798,6 @@ module.exports = {
   uploadDocumentsToQueue,
   getNotifications,
   markAllNotificationsAsRead,
-
+  requestDownloadUrl,
+  uploadDocumentSmart,
 };

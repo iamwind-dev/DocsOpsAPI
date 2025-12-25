@@ -11,7 +11,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'null'], // 'null' for local file:// access
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://fe.docsops.me', 'https://be.docsops.me', 'null'], // 'null' for local file:// access
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']

@@ -8,4 +8,5 @@ module.exports = {
   apiKeyAuth,
   authSupabase,
   optionalAuthSupabase,
+  checkBlockStatus: require('./checkBlockStatus'),
 };

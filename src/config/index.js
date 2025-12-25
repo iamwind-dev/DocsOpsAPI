@@ -23,4 +23,10 @@ module.exports = {
 
   // Frontend URL (for email links)
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
+  
+  // Gemini AI
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY,
+    baseUrl: 'https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent'
+  },
 };

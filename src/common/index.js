@@ -4,6 +4,7 @@ const httpStatus = require('./httpStatus');
 const response = require('./response');
 const n8nClient = require('./n8nClient');
 
+const constants = require('./constants');
 const pdfUtils = require('./pdfUtils');
 const websocketServer = require('./websocketServer');
 
@@ -14,6 +15,7 @@ module.exports = {
   httpStatus,
   response,
   n8nClient,
+  constants,
 
   pdfUtils,
   websocketServer,

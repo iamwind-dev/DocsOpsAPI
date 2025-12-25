@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const documentController = require('./document.controller');
-const { authSupabase } = require('../../middlewares');
+const { authSupabase, checkBlockStatus } = require('../../middlewares');
 
 // Configure multer for file uploads (memory storage)
 const upload = multer({
@@ -29,6 +29,23 @@ router.post(
   authSupabase,
   upload.array('files'),
   documentController.uploadDocumentsToQueue
+);
+
+// Smart Upload (Single file + AI Analysis + N8N Check)
+router.post(
+  '/upload-smart', 
+  authSupabase, 
+  checkBlockStatus,
+  upload.single('file'), 
+  documentController.uploadDocumentSmart
+);
+
+// Secure Download
+router.post(
+  '/request-download',
+  authSupabase,
+  checkBlockStatus,
+  documentController.requestDownloadUrl
 );
 
 

@@ -10,6 +10,8 @@ const {
   archiveRoutes,
   authRoutes,
   departmentRoutes,
+  userRoutes,
+  adminRoutes,
 } = require('../flows');
 
 // Health check
@@ -23,6 +25,8 @@ router.get('/health', (req, res) => {
 
 // API routes
 router.use('/auth', authRoutes);
+router.use('/admin', adminRoutes);
+router.use('/users', userRoutes);
 router.use('/documents', documentRoutes);
 router.use('/classification', classificationRoutes);
 router.use('/e-signature', eSignatureRoutes);
