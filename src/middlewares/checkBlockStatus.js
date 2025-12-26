@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+const { supabaseAdmin } = require('../config/supabase');
 const { ApiError, httpStatus } = require('../common');
 
 const checkBlockStatus = async (req, res, next) => {
@@ -11,7 +11,7 @@ const checkBlockStatus = async (req, res, next) => {
     }
 
     // 2. Tra cứu trạng thái trong Database
-    const { data: profile, error } = await supabase
+    const { data: profile, error } = await supabaseAdmin
       .from('user_profiles')
       .select('is_blocked, full_name')
       .eq('user_id', userId)

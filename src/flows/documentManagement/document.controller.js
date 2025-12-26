@@ -34,7 +34,7 @@ const getUserDocuments = catchAsync(async (req, res) => {
   // Filter out deleted documents (double check)
   const filteredData = (data || []).filter(doc => doc.status !== 'deleted');
 
-  console.log(`[getUserDocuments] Found ${filteredData?.length || 0} documents for owner ${ownerId}`, filteredData?.map(d => ({ id: d.id, title: d.title, status: d.status })));
+  console.log(`[getUserDocuments] Found ${filteredData?.length || 0} documents for owner ${ownerId}`);
   return response.success(res, { documents: filteredData }, 'Lấy danh sách tài liệu thành công');
 });
 
@@ -731,7 +731,7 @@ const uploadDocumentSmart = catchAsync(async (req, res) => {
     // For safety, let's use n8nClient.triggerWebhook if we know the path suffix 'webhook/check-date' maps correctly.
     // Or we use the exact path from audit-tracking-main if it's external.
     // If n8nClient.triggerWebhook uses POST by default:
-    const result = await n8nClient.triggerWebhook('webhook/check-date', {
+    const result = await n8nClient.triggerWebhook('check-date', {
        dateToCheck: detectedDate.toISOString()
     });
     // If result contains the data directly

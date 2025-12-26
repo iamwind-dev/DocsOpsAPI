@@ -28,6 +28,7 @@ if (config.nodeEnv === 'development') {
 
 // API Routes
 app.use('/api/v1', routes);
+app.use('/api/v2', require('./routes/v2'));
 
 // 404 handler
 app.use((req, res, next) => {
