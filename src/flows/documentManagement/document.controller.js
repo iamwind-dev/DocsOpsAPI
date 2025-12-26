@@ -743,7 +743,7 @@ const uploadDocumentSmart = catchAsync(async (req, res) => {
   }
 
   // Upload to Storage
-  const storagePath = `uploads/${finalUserId}/${Date.now()}_${file.originalname}`;
+  const storagePath = `documents/uploads/${finalUserId}/${Date.now()}_${file.originalname}`;
   
   const { error: storageError } = await supabaseAdmin.storage
     .from('documents')
